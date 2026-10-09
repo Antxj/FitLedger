@@ -15,7 +15,12 @@ impl Shooter {
     pub fn from_env() -> Option<Shooter> {
         let dir = PathBuf::from(std::env::var_os("FITLEDGER_SCREENSHOTS")?);
         let _ = std::fs::create_dir_all(&dir);
-        Some(Shooter { dir, index: 0, frames: 0, requested: false })
+        Some(Shooter {
+            dir,
+            index: 0,
+            frames: 0,
+            requested: false,
+        })
     }
 }
 
@@ -26,7 +31,11 @@ pub fn write_png(path: &Path, width: u32, height: u32, rgba: &[u8]) -> std::io::
         for &b in data {
             crc ^= b as u32;
             for _ in 0..8 {
-                crc = if crc & 1 != 0 { (crc >> 1) ^ 0xEDB8_8320 } else { crc >> 1 };
+                crc = if crc & 1 != 0 {
+                    (crc >> 1) ^ 0xEDB8_8320
+                } else {
+                    crc >> 1
+                };
             }
         }
         !crc

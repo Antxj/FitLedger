@@ -106,7 +106,9 @@ fn text(m: &Message, field: u8) -> Option<String> {
 }
 
 fn semicircles(m: &Message, field: u8) -> Option<f64> {
-    f(m, field).map(|v| v * (180.0 / 2f64.powi(31))).filter(|d| d.abs() <= 180.0 && *d != 0.0)
+    f(m, field)
+        .map(|v| v * (180.0 / 2f64.powi(31)))
+        .filter(|d| d.abs() <= 180.0 && *d != 0.0)
 }
 
 /// Running cadence in FIT is in strides (cycles) per minute; we show steps.
@@ -116,12 +118,12 @@ fn is_running_sport(sport: Option<i64>) -> bool {
 
 pub fn modality_for(sport: Option<i64>, sub_sport: Option<i64>) -> Modality {
     match (sport, sub_sport) {
-        (Some(1), Some(1)) => Modality::Treadmill, // running / treadmill
+        (Some(1), Some(1)) => Modality::Treadmill,  // running / treadmill
         (Some(1), Some(45)) => Modality::Treadmill, // running / indoor_running
         (Some(1), _) => Modality::RoadRun,
         (Some(8), _) => Modality::Tennis,
         (Some(4), Some(20)) | (Some(10), Some(20)) => Modality::Strength, // strength_training
-        (Some(10), _) => Modality::Strength, // generic training
+        (Some(10), _) => Modality::Strength,                              // generic training
         _ => Modality::Other,
     }
 }
@@ -131,16 +133,20 @@ pub fn parse(messages: &[Message]) -> Result<ParsedActivity, ParseError> {
 
     if let Some(fid) = messages.iter().find(|m| m.global == msg::FILE_ID) {
         // type 4 = activity. Missing type: try anyway.
-        if let Some(t) = i(fid, 0) {
-            if t != 4 {
-                return Err(ParseError::NotActivity);
-            }
+        if let Some(t) = i(fid, 0)
+            && t != 4
+        {
+            return Err(ParseError::NotActivity);
         }
         a.device_serial = i(fid, 3);
         a.time_created = time(fid, 4);
         a.device = text(fid, 8).or_else(|| {
             let manufacturer = i(fid, 1)?;
-            Some(format!("{} {}", manufacturer_name(manufacturer), i(fid, 2).unwrap_or(0)))
+            Some(format!(
+                "{} {}",
+                manufacturer_name(manufacturer),
+                i(fid, 2).unwrap_or(0)
+            ))
         });
     }
     if a.device.is_none() {
@@ -213,7 +219,9 @@ pub fn parse(messages: &[Message]) -> Result<ParsedActivity, ParseError> {
                 });
             }
             msg::LAP => {
-                let Some(start) = time(m, 2).or_else(|| time(m, TIMESTAMP)) else { continue };
+                let Some(start) = time(m, 2).or_else(|| time(m, TIMESTAMP)) else {
+                    continue;
+                };
                 a.laps.push(Lap {
                     start,
                     elapsed_s: scaled(m, 7, 1000.0, 0.0),
@@ -246,9 +254,9 @@ pub fn parse(messages: &[Message]) -> Result<ParsedActivity, ParseError> {
                     }
                 }
             }
-            msg::SET => {
+            msg::SET
                 // only active sets (set_type 1); rest periods are skipped
-                if i(m, 5) == Some(1) {
+                if i(m, 5) == Some(1) => {
                     a.sets.push(StrengthSet {
                         t: time(m, 6).or_else(|| time(m, TIMESTAMP)),
                         duration_s: scaled(m, 0, 1000.0, 0.0),
@@ -261,7 +269,6 @@ pub fn parse(messages: &[Message]) -> Result<ParsedActivity, ParseError> {
                         },
                     });
                 }
-            }
             _ => {}
         }
     }

@@ -89,16 +89,29 @@ impl Stream {
     /// typed by the user / distance recorded by the watch).
     pub fn build(samples: &[Sample], modality: Modality, distance_scale: f64) -> Stream {
         let n = samples.len();
-        let mut s = Stream { t0: samples.first().map(|x| x.t).unwrap_or(0), ..Default::default() };
+        let mut s = Stream {
+            t0: samples.first().map(|x| x.t).unwrap_or(0),
+            ..Default::default()
+        };
         if n == 0 {
             return s;
         }
         let is_run = modality.is_run();
-        let scale = if distance_scale.is_finite() && distance_scale > 0.0 { distance_scale } else { 1.0 };
+        let scale = if distance_scale.is_finite() && distance_scale > 0.0 {
+            distance_scale
+        } else {
+            1.0
+        };
         s.t = samples.iter().map(|x| (x.t - s.t0) as f64).collect();
         s.alt = samples.iter().map(|x| x.alt).collect();
-        s.power = samples.iter().map(|x| x.power.filter(|&p| p > 0.0 && p < 2500.0)).collect();
-        s.temp = samples.iter().map(|x| x.temp.filter(|&v| (-40.0..=60.0).contains(&v))).collect();
+        s.power = samples
+            .iter()
+            .map(|x| x.power.filter(|&p| p > 0.0 && p < 2500.0))
+            .collect();
+        s.temp = samples
+            .iter()
+            .map(|x| x.temp.filter(|&v| (-40.0..=60.0).contains(&v)))
+            .collect();
 
         // --- heart rate: absurd values and isolated spikes
         let raw_hr: Vec<Option<f64>> = samples.iter().map(|x| x.hr).collect();
@@ -112,11 +125,11 @@ impl Stream {
                     s.quality.hr += 1;
                     return None;
                 }
-                if let Some(m) = m {
-                    if (h - m).abs() > 35.0 {
-                        s.quality.hr += 1;
-                        return None;
-                    }
+                if let Some(m) = m
+                    && (h - m).abs() > 35.0
+                {
+                    s.quality.hr += 1;
+                    return None;
                 }
                 Some(h)
             })
@@ -196,6 +209,7 @@ impl Stream {
         // --- speed: from the file, else from distance; impossible values out
         let mut speed: Vec<Option<f64>> = samples.iter().map(|x| x.speed.map(|v| v * scale)).collect();
         if speed.iter().all(Option::is_none) {
+            #[allow(clippy::needless_range_loop)] // reads three parallel arrays
             for i in 1..n {
                 if let (Some(a), Some(b)) = (s.dist[i - 1], s.dist[i]) {
                     let dt = s.t[i] - s.t[i - 1];
@@ -215,13 +229,11 @@ impl Stream {
                     s.quality.speed += 1;
                     return None;
                 }
-                if is_run {
-                    if let Some(m) = m {
-                        // abnormal instantaneous pace: isolated jump against the neighbours
-                        if (v - *m).abs() > 2.5 && *m > MOVING_SPEED {
-                            s.quality.speed += 1;
-                            return None;
-                        }
+                if is_run && let Some(m) = m {
+                    // abnormal instantaneous pace: isolated jump against the neighbours
+                    if (v - *m).abs() > 2.5 && *m > MOVING_SPEED {
+                        s.quality.speed += 1;
+                        return None;
                     }
                 }
                 Some(v)
@@ -282,7 +294,12 @@ impl Stream {
     }
 
     pub fn moving_time(&self) -> f64 {
-        self.dt.iter().zip(&self.moving).filter(|(_, m)| **m).map(|(d, _)| d).sum()
+        self.dt
+            .iter()
+            .zip(&self.moving)
+            .filter(|(_, m)| **m)
+            .map(|(d, _)| d)
+            .sum()
     }
 
     pub fn total_distance(&self) -> Option<f64> {
@@ -322,6 +339,7 @@ impl Stream {
     /// Time-weighted average of a series over [from, to) indexes, moving samples only.
     pub fn avg(&self, series: &[Option<f64>], from: usize, to: usize) -> Option<f64> {
         let (mut sum, mut w) = (0.0, 0.0);
+        #[allow(clippy::needless_range_loop)] // reads three parallel arrays
         for i in from..to.min(self.len()) {
             if let Some(v) = series[i] {
                 let dt = if self.dt[i] > 0.0 { self.dt[i] } else { 1.0 };
@@ -335,7 +353,11 @@ impl Stream {
     }
 
     pub fn max(&self, series: &[Option<f64>], from: usize, to: usize) -> Option<f64> {
-        series[from..to.min(self.len())].iter().flatten().copied().reduce(f64::max)
+        series[from..to.min(self.len())]
+            .iter()
+            .flatten()
+            .copied()
+            .reduce(f64::max)
     }
 
     /// Elevation gain and loss with a 3 m hysteresis (ignores barometer noise).

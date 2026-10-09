@@ -2,5 +2,4 @@
 
 pub mod activity;
 pub mod decode;
-#[cfg(test)]
 pub mod writer;

@@ -74,6 +74,8 @@ pub struct State {
     pub sort: SortKey,
     pub descending: bool,
     pub selected: Vec<i64>,
+    /// Tennis/strength: show the area overview instead of the list.
+    pub show_list: bool,
 }
 
 impl Default for State {
@@ -91,46 +93,47 @@ impl Default for State {
             sort: SortKey::Date,
             descending: true,
             selected: Vec::new(),
+            show_list: false,
         }
     }
 }
 
 fn matches(a: &Activity, s: &State, modality: Option<Modality>) -> bool {
-    if let Some(m) = modality {
-        if a.modality != m {
-            return false;
-        }
+    if let Some(m) = modality
+        && a.modality != m
+    {
+        return false;
     }
     let day = a.local_start().date();
     let today = chrono::Local::now().date_naive();
-    if let Some(d) = s.period.days() {
-        if day < today - Duration::days(d - 1) {
-            return false;
-        }
+    if let Some(d) = s.period.days()
+        && day < today - Duration::days(d - 1)
+    {
+        return false;
     }
     if s.period == Period::Custom && (day < s.from || day > s.to) {
         return false;
     }
     let km = a.distance().unwrap_or(0.0) / 1000.0;
-    if let Some(v) = format::parse_num(&s.min_km) {
-        if km < v {
-            return false;
-        }
+    if let Some(v) = format::parse_num(&s.min_km)
+        && km < v
+    {
+        return false;
     }
-    if let Some(v) = format::parse_num(&s.max_km) {
-        if km > v {
-            return false;
-        }
+    if let Some(v) = format::parse_num(&s.max_km)
+        && km > v
+    {
+        return false;
     }
-    if let Some(v) = format::parse_num(&s.min_hr) {
-        if a.avg_hr.is_none_or(|h| h < v) {
-            return false;
-        }
+    if let Some(v) = format::parse_num(&s.min_hr)
+        && a.avg_hr.is_none_or(|h| h < v)
+    {
+        return false;
     }
-    if let Some(v) = format::parse_num(&s.max_hr) {
-        if a.avg_hr.is_none_or(|h| h > v) {
-            return false;
-        }
+    if let Some(v) = format::parse_num(&s.max_hr)
+        && a.avg_hr.is_none_or(|h| h > v)
+    {
+        return false;
     }
     let q = s.search.trim().to_lowercase();
     if !q.is_empty() {
@@ -178,30 +181,41 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
             let n = app.pages.activities.selected.len();
             if ui
                 .add_enabled(n >= 2, egui::Button::new(trf!("Comparar ({n})", "Compare ({n})")))
-                .on_disabled_hover_text(tr!("Marque 2 ou mais atividades na tabela.", "Tick 2 or more activities in the table."))
+                .on_disabled_hover_text(tr!(
+                    "Marque 2 ou mais atividades na tabela.",
+                    "Tick 2 or more activities in the table."
+                ))
                 .clicked()
             {
                 app.compare_ids = app.pages.activities.selected.clone();
                 app.go(Page::Compare);
             }
-            if ui.button(tr!("🔄 Procurar novos em /fits", "🔄 Look for new files in /fits")).clicked() {
+            if ui
+                .button(tr!("🔄 Procurar novos em /fits", "🔄 Look for new files in /fits"))
+                .clicked()
+            {
                 app.import_from_folder(false);
             }
         });
     });
 
-    match modality {
-        Some(Modality::Tennis) => {
-            egui::CollapsingHeader::new(RichText::new(tr!("Visão geral do tênis", "Tennis overview")).strong())
-                .default_open(true)
-                .show(ui, |ui| super::tennis::overview(app, ui));
+    if matches!(modality, Some(Modality::Tennis) | Some(Modality::Strength)) {
+        ui.horizontal(|ui| {
+            let s = &mut app.pages.activities.show_list;
+            ui.selectable_value(s, false, tr!("Visão geral", "Overview"));
+            ui.selectable_value(s, true, tr!("Lista de sessões", "Session list"));
+        });
+        ui.separator();
+        if !app.pages.activities.show_list {
+            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
+                if modality == Some(Modality::Tennis) {
+                    super::tennis::overview(app, ui);
+                } else {
+                    super::strength::overview(app, ui);
+                }
+            });
+            return;
         }
-        Some(Modality::Strength) => {
-            egui::CollapsingHeader::new(RichText::new(tr!("Musculação: exercícios e evolução", "Strength: exercises and progress")).strong())
-                .default_open(true)
-                .show(ui, |ui| super::strength::overview(app, ui));
-        }
-        _ => {}
     }
 
     filters(ui, &mut app.pages.activities);
@@ -211,7 +225,9 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
     let mut rows: Vec<&Activity> = app.data.activities.iter().filter(|a| matches(a, s, modality)).collect();
     let (key, desc) = (s.sort, s.descending);
     rows.sort_by(|a, b| {
-        let o = sort_value(a, key).partial_cmp(&sort_value(b, key)).unwrap_or(std::cmp::Ordering::Equal);
+        let o = sort_value(a, key)
+            .partial_cmp(&sort_value(b, key))
+            .unwrap_or(std::cmp::Ordering::Equal);
         if desc { o.reverse() } else { o }
     });
 
@@ -224,7 +240,10 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
                     "No activities yet. Put .fit files in the /fits folder or use \"Import FIT files\"."
                 )
             } else {
-                tr!("Nenhuma atividade com esses filtros.", "No activities match these filters.")
+                tr!(
+                    "Nenhuma atividade com esses filtros.",
+                    "No activities match these filters."
+                )
             },
         );
         return;
@@ -248,8 +267,15 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
     let mut sort_click: Option<SortKey> = None;
     let selected = app.pages.activities.selected.clone();
     let header = |ui: &mut Ui, label: &str, k: SortKey, click: &mut Option<SortKey>| {
-        let arrow = if key == k { if desc { " ▼" } else { " ▲" } } else { "" };
-        if ui.add(egui::Button::new(RichText::new(format!("{label}{arrow}")).strong()).frame(false)).clicked() {
+        let arrow = if key == k {
+            if desc { " ▼" } else { " ▲" }
+        } else {
+            ""
+        };
+        if ui
+            .add(egui::Button::new(RichText::new(format!("{label}{arrow}")).strong()).frame(false))
+            .clicked()
+        {
             *click = Some(k);
         }
     };
@@ -303,7 +329,11 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
                     ui.label(format::opt_duration(a.duration()));
                 });
                 row.col(|ui| {
-                    ui.label(if a.modality.is_run() { format::opt_pace(a.pace_s_per_km()) } else { format::dash() });
+                    ui.label(if a.modality.is_run() {
+                        format::opt_pace(a.pace_s_per_km())
+                    } else {
+                        format::dash()
+                    });
                 });
                 row.col(|ui| {
                     ui.label(format::bpm(a.avg_hr));
@@ -312,13 +342,25 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
                     ui.label(format::bpm(a.max_hr));
                 });
                 row.col(|ui| {
-                    ui.label(a.avg_cadence.map(|c| format!("{} spm", c.round())).unwrap_or_else(format::dash));
+                    ui.label(
+                        a.avg_cadence
+                            .map(|c| format!("{} spm", c.round()))
+                            .unwrap_or_else(format::dash),
+                    );
                 });
                 row.col(|ui| {
-                    ui.label(a.ascent_m.map(|v| format!("{} m", v.round())).unwrap_or_else(format::dash));
+                    ui.label(
+                        a.ascent_m
+                            .map(|v| format!("{} m", v.round()))
+                            .unwrap_or_else(format::dash),
+                    );
                 });
                 row.col(|ui| {
-                    ui.label(a.calories.map(|v| format!("{} kcal", v.round())).unwrap_or_else(format::dash));
+                    ui.label(
+                        a.calories
+                            .map(|v| format!("{} kcal", v.round()))
+                            .unwrap_or_else(format::dash),
+                    );
                 });
                 row.col(|ui| {
                     ui.label(a.load.map(|v| format!("{}", v.round())).unwrap_or_else(format::dash));
@@ -351,7 +393,10 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
         }
     }
     // drop selections that are no longer visible in the list
-    app.pages.activities.selected.retain(|id| ids.contains(id) || app.data.get(*id).is_some());
+    app.pages
+        .activities
+        .selected
+        .retain(|id| ids.contains(id) || app.data.get(*id).is_some());
     if let Some(id) = open {
         app.go(Page::Activity(id));
     }
@@ -359,12 +404,24 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
 
 fn filters(ui: &mut Ui, s: &mut State) {
     ui.horizontal_wrapped(|ui| {
-        ui.add(egui::TextEdit::singleline(&mut s.search).hint_text(tr!("🔍 Pesquisar", "🔍 Search")).desired_width(170.0));
+        ui.add(
+            egui::TextEdit::singleline(&mut s.search)
+                .hint_text(tr!("🔍 Pesquisar", "🔍 Search"))
+                .desired_width(170.0),
+        );
         ui.separator();
         egui::ComboBox::from_id_salt("period")
             .selected_text(s.period.label())
             .show_ui(ui, |ui| {
-                for p in [Period::All, Period::Days7, Period::Days30, Period::Months3, Period::Months6, Period::Year, Period::Custom] {
+                for p in [
+                    Period::All,
+                    Period::Days7,
+                    Period::Days30,
+                    Period::Months3,
+                    Period::Months6,
+                    Period::Year,
+                    Period::Custom,
+                ] {
                     ui.selectable_value(&mut s.period, p, p.label());
                 }
             });
@@ -375,15 +432,34 @@ fn filters(ui: &mut Ui, s: &mut State) {
         }
         ui.separator();
         ui.label(tr!("km", "km"));
-        ui.add(egui::TextEdit::singleline(&mut s.min_km).hint_text("min").desired_width(40.0));
-        ui.add(egui::TextEdit::singleline(&mut s.max_km).hint_text("máx").desired_width(40.0));
+        ui.add(
+            egui::TextEdit::singleline(&mut s.min_km)
+                .hint_text("min")
+                .desired_width(40.0),
+        );
+        ui.add(
+            egui::TextEdit::singleline(&mut s.max_km)
+                .hint_text("máx")
+                .desired_width(40.0),
+        );
         ui.separator();
         ui.label(tr!("FC méd", "Avg HR"));
-        ui.add(egui::TextEdit::singleline(&mut s.min_hr).hint_text("min").desired_width(40.0));
-        ui.add(egui::TextEdit::singleline(&mut s.max_hr).hint_text("máx").desired_width(40.0));
+        ui.add(
+            egui::TextEdit::singleline(&mut s.min_hr)
+                .hint_text("min")
+                .desired_width(40.0),
+        );
+        ui.add(
+            egui::TextEdit::singleline(&mut s.max_hr)
+                .hint_text("máx")
+                .desired_width(40.0),
+        );
         if ui.button(tr!("Limpar", "Clear")).clicked() {
             let keep = std::mem::take(&mut s.selected);
-            *s = State { selected: keep, ..Default::default() };
+            *s = State {
+                selected: keep,
+                ..Default::default()
+            };
         }
     });
 }

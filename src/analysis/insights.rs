@@ -32,7 +32,7 @@ pub struct Input<'a> {
     pub today: NaiveDate,
 }
 
-fn runs<'a>(acts: &'a [Activity]) -> impl Iterator<Item = &'a Activity> {
+fn runs(acts: &[Activity]) -> impl Iterator<Item = &Activity> {
     acts.iter().filter(|a| a.modality.is_run())
 }
 
@@ -53,7 +53,11 @@ pub fn generate(inp: &Input) -> Vec<Insight> {
 
     // 1. reference tests: HR change between the first and the latest run
     for (name, ids) in &inp.ref_tests {
-        let rs: Vec<&Activity> = ids.iter().filter_map(|id| by_id.get(id).copied()).filter(|a| a.avg_hr.is_some()).collect();
+        let rs: Vec<&Activity> = ids
+            .iter()
+            .filter_map(|id| by_id.get(id).copied())
+            .filter(|a| a.avg_hr.is_some())
+            .collect();
         if rs.len() < 2 {
             continue;
         }
@@ -131,7 +135,11 @@ pub fn generate(inp: &Input) -> Vec<Insight> {
                                 format::date(x.date),
                                 x.modality.label(),
                                 format::bpm(Some(x.hr)),
-                                if x.minutes > 0 { trf!(" ({} min estáveis)", " ({} steady min)", x.minutes) } else { String::new() }
+                                if x.minutes > 0 {
+                                    trf!(" ({} min estáveis)", " ({} steady min)", x.minutes)
+                                } else {
+                                    String::new()
+                                }
                             )
                         })
                         .collect(),
@@ -147,11 +155,17 @@ pub fn generate(inp: &Input) -> Vec<Insight> {
     let mut before = Vec::new();
     for a in runs(inp.acts) {
         if let Some((pace, n)) = inp.metrics.get(&a.id).and_then(|m| trends::pace_in_hr_band(m, lo, hi)) {
-            if day_of(a) > cut { recent.push((a, pace, n)) } else { before.push((a, pace, n)) }
+            if day_of(a) > cut {
+                recent.push((a, pace, n))
+            } else {
+                before.push((a, pace, n))
+            }
         }
     }
     if !recent.is_empty() && !before.is_empty() {
-        let avg = |v: &[(&Activity, f64, usize)]| v.iter().map(|x| x.1 * x.2 as f64).sum::<f64>() / v.iter().map(|x| x.2 as f64).sum::<f64>();
+        let avg = |v: &[(&Activity, f64, usize)]| {
+            v.iter().map(|x| x.1 * x.2 as f64).sum::<f64>() / v.iter().map(|x| x.2 as f64).sum::<f64>()
+        };
         let (r, b) = (avg(&recent), avg(&before));
         if (r - b).abs() >= 5.0 {
             let mut ev: Vec<String> = before
@@ -187,26 +201,39 @@ pub fn generate(inp: &Input) -> Vec<Insight> {
     }
 
     // 4. longest run of the last 90 days done in the last 7 days
-    let last90: Vec<&Activity> = runs(inp.acts).filter(|a| day_of(a) > inp.today - Duration::days(90)).collect();
-    if last90.len() >= 3 {
-        if let Some(longest) = last90.iter().max_by(|a, b| a.distance().unwrap_or(0.0).total_cmp(&b.distance().unwrap_or(0.0))) {
-            if day_of(longest) > inp.today - Duration::days(7) && longest.distance().unwrap_or(0.0) > 0.0 {
-                out.push(Insight {
-                    text: trf!(
-                        "Você atingiu seu maior longão dos últimos 90 dias: {}.",
-                        "You did your longest run of the last 90 days: {}.",
-                        format::opt_km(longest.distance())
-                    ),
-                    tone: Tone::Good,
-                    evidence: vec![line(longest), trf!("{} corridas nos últimos 90 dias", "{} runs in the last 90 days", last90.len())],
-                });
-            }
-        }
+    let last90: Vec<&Activity> = runs(inp.acts)
+        .filter(|a| day_of(a) > inp.today - Duration::days(90))
+        .collect();
+    if last90.len() >= 3
+        && let Some(longest) = last90
+            .iter()
+            .max_by(|a, b| a.distance().unwrap_or(0.0).total_cmp(&b.distance().unwrap_or(0.0)))
+        && day_of(longest) > inp.today - Duration::days(7)
+        && longest.distance().unwrap_or(0.0) > 0.0
+    {
+        out.push(Insight {
+            text: trf!(
+                "Você atingiu seu maior longão dos últimos 90 dias: {}.",
+                "You did your longest run of the last 90 days: {}.",
+                format::opt_km(longest.distance())
+            ),
+            tone: Tone::Good,
+            evidence: vec![
+                line(longest),
+                trf!(
+                    "{} corridas nos últimos 90 dias",
+                    "{} runs in the last 90 days",
+                    last90.len()
+                ),
+            ],
+        });
     }
 
     // 5. runs per week in the last 4 weeks
     let start4 = inp.today - Duration::days(27);
-    let n4: Vec<&Activity> = runs(inp.acts).filter(|a| day_of(a) >= start4 && day_of(a) <= inp.today).collect();
+    let n4: Vec<&Activity> = runs(inp.acts)
+        .filter(|a| day_of(a) >= start4 && day_of(a) <= inp.today)
+        .collect();
     if !n4.is_empty() {
         out.push(Insight {
             text: trf!(
@@ -220,8 +247,12 @@ pub fn generate(inp: &Input) -> Vec<Insight> {
     }
 
     // 6. runs on the day after tennis: HR compared with other runs at a similar pace
-    let tennis_days: std::collections::HashSet<NaiveDate> =
-        inp.acts.iter().filter(|a| a.modality == Modality::Tennis).map(day_of).collect();
+    let tennis_days: std::collections::HashSet<NaiveDate> = inp
+        .acts
+        .iter()
+        .filter(|a| a.modality == Modality::Tennis)
+        .map(day_of)
+        .collect();
     if !tennis_days.is_empty() {
         let (after, other): (Vec<&Activity>, Vec<&Activity>) = runs(inp.acts)
             .filter(|a| a.avg_hr.is_some() && a.pace_s_per_km().is_some())
@@ -229,12 +260,18 @@ pub fn generate(inp: &Input) -> Vec<Insight> {
         if after.len() >= 2 && other.len() >= 3 {
             // HR per (m/min): compares effort independent of pace
             let eff = |v: &[&Activity]| {
-                v.iter().map(|a| a.avg_hr.unwrap() / (60_000.0 / a.pace_s_per_km().unwrap())).sum::<f64>() / v.len() as f64
+                v.iter()
+                    .map(|a| a.avg_hr.unwrap() / (60_000.0 / a.pace_s_per_km().unwrap()))
+                    .sum::<f64>()
+                    / v.len() as f64
             };
             let (ea, eo) = (eff(&after), eff(&other));
             let pct = (ea - eo) / eo * 100.0;
             if pct.abs() >= 2.0 {
-                let mut ev: Vec<String> = after.iter().map(|a| format!("{} {}", tr!("[após tênis]", "[after tennis]"), line(a))).collect();
+                let mut ev: Vec<String> = after
+                    .iter()
+                    .map(|a| format!("{} {}", tr!("[após tênis]", "[after tennis]"), line(a)))
+                    .collect();
                 ev.extend(other.iter().map(|a| line(a)));
                 out.push(Insight {
                     text: if pct > 0.0 {
@@ -259,7 +296,11 @@ pub fn generate(inp: &Input) -> Vec<Insight> {
 
     // 7. running volume of the last 7 days vs the 4 weeks before
     let km = |from: NaiveDate, to: NaiveDate| -> f64 {
-        runs(inp.acts).filter(|a| (from..=to).contains(&day_of(a))).filter_map(|a| a.distance()).sum::<f64>() / 1000.0
+        runs(inp.acts)
+            .filter(|a| (from..=to).contains(&day_of(a)))
+            .filter_map(|a| a.distance())
+            .sum::<f64>()
+            / 1000.0
     };
     let last7 = km(inp.today - Duration::days(6), inp.today);
     let prev28 = km(inp.today - Duration::days(34), inp.today - Duration::days(7));
@@ -290,16 +331,31 @@ pub fn generate(inp: &Input) -> Vec<Insight> {
                 tone: if pct > 30.0 { Tone::Attention } else { Tone::Neutral },
                 evidence: vec![
                     trf!("últimos 7 dias: {} km", "last 7 days: {} km", format::num(last7, 1)),
-                    trf!("média semanal das 4 semanas anteriores: {} km", "weekly average of the previous 4 weeks: {} km", format::num(avg, 1)),
+                    trf!(
+                        "média semanal das 4 semanas anteriores: {} km",
+                        "weekly average of the previous 4 weeks: {} km",
+                        format::num(avg, 1)
+                    ),
                 ],
             });
         }
     }
 
     // 8. cardiac drift: last 30 days vs before
-    let drift = |a: &Activity| inp.metrics.get(&a.id).and_then(|m| m.drift.as_ref()).and_then(|d| d.decoupling_pct);
-    let recent_d: Vec<(&Activity, f64)> = runs(inp.acts).filter(|a| day_of(a) > cut).filter_map(|a| drift(a).map(|d| (a, d))).collect();
-    let before_d: Vec<(&Activity, f64)> = runs(inp.acts).filter(|a| day_of(a) <= cut).filter_map(|a| drift(a).map(|d| (a, d))).collect();
+    let drift = |a: &Activity| {
+        inp.metrics
+            .get(&a.id)
+            .and_then(|m| m.drift.as_ref())
+            .and_then(|d| d.decoupling_pct)
+    };
+    let recent_d: Vec<(&Activity, f64)> = runs(inp.acts)
+        .filter(|a| day_of(a) > cut)
+        .filter_map(|a| drift(a).map(|d| (a, d)))
+        .collect();
+    let before_d: Vec<(&Activity, f64)> = runs(inp.acts)
+        .filter(|a| day_of(a) <= cut)
+        .filter_map(|a| drift(a).map(|d| (a, d)))
+        .collect();
     if recent_d.len() >= 2 && before_d.len() >= 2 {
         let avg = |v: &[(&Activity, f64)]| v.iter().map(|x| x.1).sum::<f64>() / v.len() as f64;
         let (r, b) = (avg(&recent_d), avg(&before_d));
@@ -355,7 +411,12 @@ mod tests {
             run(1, NaiveDate::from_ymd_opt(2026, 5, 3).unwrap(), 5.0, 362.0, 179.0),
             run(2, NaiveDate::from_ymd_opt(2026, 8, 26).unwrap(), 5.0, 358.0, 168.0),
         ];
-        let inp = Input { acts: &acts, metrics: &HashMap::new(), ref_tests: vec![("5 km".into(), vec![1, 2])], today };
+        let inp = Input {
+            acts: &acts,
+            metrics: &HashMap::new(),
+            ref_tests: vec![("5 km".into(), vec![1, 2])],
+            today,
+        };
         let ins = generate(&inp);
         let t = ins.iter().find(|i| i.text.contains("caiu 11 bpm")).expect("insight");
         assert_eq!(t.tone, Tone::Good);
@@ -370,10 +431,19 @@ mod tests {
             acts.push(run(i as i64, today - Duration::days(*back), 5.0, 360.0, 160.0));
         }
         acts.push(run(99, today, 12.0, 380.0, 150.0));
-        let inp = Input { acts: &acts, metrics: &HashMap::new(), ref_tests: vec![], today };
+        let inp = Input {
+            acts: &acts,
+            metrics: &HashMap::new(),
+            ref_tests: vec![],
+            today,
+        };
         let ins = generate(&inp);
         assert!(ins.iter().any(|i| i.text.contains("vezes por semana")));
-        assert!(ins.iter().any(|i| i.text.contains("aumentou")), "{:?}", ins.iter().map(|i| &i.text).collect::<Vec<_>>());
+        assert!(
+            ins.iter().any(|i| i.text.contains("aumentou")),
+            "{:?}",
+            ins.iter().map(|i| &i.text).collect::<Vec<_>>()
+        );
         assert!(ins.iter().any(|i| i.text.contains("maior longão")));
     }
 }

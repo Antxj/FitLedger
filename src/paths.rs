@@ -20,7 +20,11 @@ impl Paths {
     pub fn resolve() -> Paths {
         let base = std::env::var_os("FITLEDGER_HOME")
             .map(PathBuf::from)
-            .or_else(|| std::env::current_exe().ok().and_then(|p| p.parent().map(Path::to_path_buf)))
+            .or_else(|| {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|p| p.parent().map(Path::to_path_buf))
+            })
             .unwrap_or_else(|| PathBuf::from("."));
         Paths::at(base)
     }

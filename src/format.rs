@@ -23,6 +23,21 @@ pub fn num_trim(v: f64, decimals: usize) -> String {
     }
 }
 
+/// Integer with thousands separator: "51.322" (pt) / "51,322" (en).
+pub fn int(v: f64) -> String {
+    let n = v.round() as i64;
+    let digits = n.unsigned_abs().to_string();
+    let sep = if crate::i18n::pt() { '.' } else { ',' };
+    let mut out = String::new();
+    for (i, c) in digits.chars().enumerate() {
+        if i > 0 && (digits.len() - i).is_multiple_of(3) {
+            out.push(sep);
+        }
+        out.push(c);
+    }
+    if n < 0 { format!("-{out}") } else { out }
+}
+
 pub fn km(meters: f64) -> String {
     format!("{} km", num(meters / 1000.0, 2))
 }
@@ -60,7 +75,11 @@ pub fn duration(secs: f64) -> String {
     }
     let total = secs.round() as i64;
     let (h, m, s) = (total / 3600, (total % 3600) / 60, total % 60);
-    if h > 0 { format!("{h}:{m:02}:{s:02}") } else { format!("{m}:{s:02}") }
+    if h > 0 {
+        format!("{h}:{m:02}:{s:02}")
+    } else {
+        format!("{m}:{s:02}")
+    }
 }
 
 pub fn opt_duration(secs: Option<f64>) -> String {
@@ -70,24 +89,15 @@ pub fn opt_duration(secs: Option<f64>) -> String {
 /// "5h10" / "45 min" — totals on cards.
 pub fn hours_short(secs: f64) -> String {
     let mins = (secs / 60.0).round() as i64;
-    if mins < 60 { format!("{mins} min") } else { format!("{}h{:02}", mins / 60, mins % 60) }
+    if mins < 60 {
+        format!("{mins} min")
+    } else {
+        format!("{}h{:02}", mins / 60, mins % 60)
+    }
 }
 
 pub fn bpm(v: Option<f64>) -> String {
     v.map(|v| format!("{} bpm", v.round() as i64)).unwrap_or_else(dash)
-}
-
-pub fn opt_num(v: Option<f64>, decimals: usize, unit: &str) -> String {
-    match v {
-        Some(v) if unit.is_empty() => num(v, decimals),
-        Some(v) => format!("{} {unit}", num(v, decimals)),
-        None => dash(),
-    }
-}
-
-/// m/s → km/h.
-pub fn kmh(mps: f64) -> f64 {
-    mps * 3.6
 }
 
 /// Pace (s/km) → speed (km/h). 360 s/km = 10 km/h.
@@ -141,11 +151,19 @@ pub fn parse_duration(text: &str) -> Option<f64> {
 }
 
 pub fn date(d: NaiveDate) -> String {
-    if crate::i18n::pt() { d.format("%d/%m/%Y").to_string() } else { d.format("%Y-%m-%d").to_string() }
+    if crate::i18n::pt() {
+        d.format("%d/%m/%Y").to_string()
+    } else {
+        d.format("%Y-%m-%d").to_string()
+    }
 }
 
 pub fn date_short(d: NaiveDate) -> String {
-    if crate::i18n::pt() { d.format("%d/%m").to_string() } else { d.format("%m-%d").to_string() }
+    if crate::i18n::pt() {
+        d.format("%d/%m").to_string()
+    } else {
+        d.format("%m-%d").to_string()
+    }
 }
 
 pub fn datetime(d: NaiveDateTime) -> String {
@@ -165,13 +183,33 @@ pub fn month_name(month: u32) -> &'static str {
     let i = (month.clamp(1, 12) - 1) as usize;
     if crate::i18n::pt() {
         [
-            "Janeiro", "Fevereiro", "Março", "Abril", "Maio", "Junho", "Julho", "Agosto",
-            "Setembro", "Outubro", "Novembro", "Dezembro",
+            "Janeiro",
+            "Fevereiro",
+            "Março",
+            "Abril",
+            "Maio",
+            "Junho",
+            "Julho",
+            "Agosto",
+            "Setembro",
+            "Outubro",
+            "Novembro",
+            "Dezembro",
         ][i]
     } else {
         [
-            "January", "February", "March", "April", "May", "June", "July", "August",
-            "September", "October", "November", "December",
+            "January",
+            "February",
+            "March",
+            "April",
+            "May",
+            "June",
+            "July",
+            "August",
+            "September",
+            "October",
+            "November",
+            "December",
         ][i]
     }
 }
@@ -216,6 +254,9 @@ mod tests {
         assert_eq!(num_trim(10.0, 2), "10");
         assert_eq!(num_trim(10.5, 2), "10,5");
         assert_eq!(pct_signed(8.0), "+8%");
+        assert_eq!(int(51322.4), "51.322");
+        assert_eq!(int(999.0), "999");
+        assert_eq!(int(-1234567.0), "-1.234.567");
     }
 
     #[test]

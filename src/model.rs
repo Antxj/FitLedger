@@ -32,7 +32,10 @@ impl Modality {
     }
 
     pub fn from_code(c: &str) -> Modality {
-        Modality::ALL.into_iter().find(|m| m.code() == c).unwrap_or(Modality::Other)
+        Modality::ALL
+            .into_iter()
+            .find(|m| m.code() == c)
+            .unwrap_or(Modality::Other)
     }
 
     pub fn label(self) -> &'static str {

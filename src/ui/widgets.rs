@@ -63,7 +63,11 @@ pub fn setup_style(ctx: &egui::Context) {
         style.text_styles.insert(TextStyle::Small, FontId::proportional(11.5));
         style.visuals.selection.bg_fill = ACCENT.gamma_multiply(0.55);
         // visible outline for text fields and buttons in both themes
-        let outline = if style.visuals.dark_mode { Color32::from_gray(70) } else { Color32::from_gray(190) };
+        let outline = if style.visuals.dark_mode {
+            Color32::from_gray(70)
+        } else {
+            Color32::from_gray(190)
+        };
         style.visuals.widgets.inactive.bg_stroke = egui::Stroke::new(1.0, outline);
         style.visuals.hyperlink_color = ACCENT;
     });
@@ -86,7 +90,11 @@ pub fn weak(ui: &Ui, text: impl Into<String>) -> RichText {
 
 pub fn card_frame(ui: &Ui) -> egui::Frame {
     egui::Frame::new()
-        .fill(ui.visuals().faint_bg_color.gamma_multiply(if ui.visuals().dark_mode { 2.2 } else { 1.0 }))
+        .fill(
+            ui.visuals()
+                .faint_bg_color
+                .gamma_multiply(if ui.visuals().dark_mode { 2.2 } else { 1.0 }),
+        )
         .stroke(ui.visuals().widgets.noninteractive.bg_stroke)
         .corner_radius(10.0)
         .inner_margin(egui::Margin::symmetric(14, 10))
@@ -143,7 +151,12 @@ pub fn modality_chip(ui: &mut Ui, m: Modality) {
 /// Progress bar with "65 / 100 km — 65%".
 pub fn progress(ui: &mut Ui, fraction: f32, text: &str, done: bool) {
     let color = if done { GOOD } else { ACCENT };
-    ui.add(egui::ProgressBar::new(fraction.clamp(0.0, 1.0)).fill(color).text(text).desired_height(18.0));
+    ui.add(
+        egui::ProgressBar::new(fraction.clamp(0.0, 1.0))
+            .fill(color)
+            .text(text)
+            .desired_height(18.0),
+    );
 }
 
 pub fn empty_state(ui: &mut Ui, text: &str) {
@@ -163,7 +176,11 @@ pub fn note(ui: &mut Ui, text: &str, color: Color32) {
         .inner_margin(egui::Margin::symmetric(10, 6))
         .show(ui, |ui| {
             ui.set_width(ui.available_width());
-            ui.label(RichText::new(text).color(if ui.visuals().dark_mode { color.gamma_multiply(1.2) } else { color }));
+            ui.label(RichText::new(text).color(if ui.visuals().dark_mode {
+                color.gamma_multiply(1.2)
+            } else {
+                color
+            }));
         });
 }
 
@@ -206,7 +223,10 @@ pub fn confirm_window(ctx: &egui::Context, open: &mut bool, title: &str, text: &
                 ui.label(text);
                 ui.add_space(8.0);
                 ui.horizontal(|ui| {
-                    if ui.button(RichText::new(tr!("Sim, confirmar", "Yes, confirm")).color(BAD)).clicked() {
+                    if ui
+                        .button(RichText::new(tr!("Sim, confirmar", "Yes, confirm")).color(BAD))
+                        .clicked()
+                    {
                         yes = true;
                         *open = false;
                     }

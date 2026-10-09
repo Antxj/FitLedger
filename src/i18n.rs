@@ -12,11 +12,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 /// Fixed text in the current language.
 macro_rules! tr {
     ($pt:literal, $en:literal $(,)?) => {
-        if $crate::i18n::pt() {
-            $pt
-        } else {
-            $en
-        }
+        if $crate::i18n::pt() { $pt } else { $en }
     };
 }
 
@@ -73,7 +69,9 @@ pub fn pt() -> bool {
 /// Applies the user's choice (None = automatic from Windows).
 /// FITLEDGER_LANGUAGE=pt|en forces a language (documentation screenshots).
 pub fn aplicar(escolha: Option<Idioma>) {
-    let forcado = std::env::var("FITLEDGER_LANGUAGE").ok().and_then(|c| Idioma::do_codigo(&c));
+    let forcado = std::env::var("FITLEDGER_LANGUAGE")
+        .ok()
+        .and_then(|c| Idioma::do_codigo(&c));
     let idioma = forcado.or(escolha).unwrap_or_else(do_windows);
     PORTUGUES.store(idioma == Idioma::Portugues, Ordering::Relaxed);
 }

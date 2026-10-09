@@ -72,7 +72,10 @@ impl Data {
 
 #[derive(Debug, Clone)]
 pub enum JobKind {
-    Import { files: Vec<std::path::PathBuf>, remember_errors: bool },
+    Import {
+        files: Vec<std::path::PathBuf>,
+        remember_errors: bool,
+    },
     Recalculate,
 }
 
@@ -163,6 +166,11 @@ impl App {
         app.reload();
         if app.shooter.is_some() {
             // screenshot mode: import synchronously, no network
+            if std::env::var_os("FITLEDGER_DEMO").is_some()
+                && let Err(e) = crate::demo::fill(&mut app.db)
+            {
+                eprintln!("demo data: {e}");
+            }
             if app.data.activities.is_empty() {
                 let files = import::scan(&app.paths.fits);
                 import::import_files(&mut app.db, &files, false, &mut |_, _, _| {});
@@ -227,11 +235,19 @@ impl App {
     }
 
     pub fn toast(&mut self, text: impl Into<String>) {
-        self.toasts.push(Toast { text: text.into(), error: false, until: Instant::now() + Duration::from_secs(5) });
+        self.toasts.push(Toast {
+            text: text.into(),
+            error: false,
+            until: Instant::now() + Duration::from_secs(5),
+        });
     }
 
     pub fn toast_error(&mut self, text: impl Into<String>) {
-        self.toasts.push(Toast { text: text.into(), error: true, until: Instant::now() + Duration::from_secs(10) });
+        self.toasts.push(Toast {
+            text: text.into(),
+            error: true,
+            until: Instant::now() + Duration::from_secs(10),
+        });
     }
 
     pub fn job_running(&self) -> bool {
@@ -248,7 +264,10 @@ impl App {
             }
             return;
         }
-        self.start_job(JobKind::Import { files: pending, remember_errors: true });
+        self.start_job(JobKind::Import {
+            files: pending,
+            remember_errors: true,
+        });
     }
 
     pub fn import_picked_files(&mut self) {
@@ -256,10 +275,13 @@ impl App {
             .set_title(tr!("Importar arquivos FIT", "Import FIT files"))
             .add_filter("FIT", &["fit", "FIT"])
             .pick_files();
-        if let Some(files) = picked {
-            if !files.is_empty() {
-                self.start_job(JobKind::Import { files, remember_errors: false });
-            }
+        if let Some(files) = picked
+            && !files.is_empty()
+        {
+            self.start_job(JobKind::Import {
+                files,
+                remember_errors: false,
+            });
         }
     }
 
@@ -340,9 +362,10 @@ impl App {
                 }
                 self.last_report = Some(r);
             }
-            JobResult::Recalculate(n) => {
-                self.toast(trf!("Métricas recalculadas ({n} atividades).", "Metrics recalculated ({n} activities)."))
-            }
+            JobResult::Recalculate(n) => self.toast(trf!(
+                "Métricas recalculadas ({n} atividades).",
+                "Metrics recalculated ({n} activities)."
+            )),
             JobResult::Failed(e) => self.toast_error(e),
         }
     }
@@ -367,9 +390,13 @@ impl App {
         let page = self.page.clone();
         let nav = |ui: &mut egui::Ui, icon: &str, label: &str, selected: bool| -> bool {
             let text = RichText::new(format!("{icon}  {label}")).size(15.0);
-            ui.add_sized([ui.available_width(), 30.0], egui::Button::selectable(selected, text)).clicked()
+            ui.add_sized([ui.available_width(), 30.0], egui::Button::selectable(selected, text))
+                .clicked()
         };
-        let in_activities = matches!(page, Page::Activities(_) | Page::Activity(_) | Page::Manual(_) | Page::Compare);
+        let in_activities = matches!(
+            page,
+            Page::Activities(_) | Page::Activity(_) | Page::Manual(_) | Page::Compare
+        );
         if nav(ui, "📊", tr!("Dashboard", "Dashboard"), page == Page::Dashboard) {
             self.go(Page::Dashboard);
         }
@@ -424,14 +451,20 @@ impl App {
             self.job_status(ui);
             ui.add_space(4.0);
             if ui
-                .add_sized([ui.available_width(), 28.0], egui::Button::new(tr!("➕ Atividade manual", "➕ Manual activity")))
+                .add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::Button::new(tr!("➕ Atividade manual", "➕ Manual activity")),
+                )
                 .clicked()
             {
                 self.pages.manual = manual::State::default();
                 self.go(Page::Manual(None));
             }
             if ui
-                .add_sized([ui.available_width(), 28.0], egui::Button::new(tr!("📂 Importar arquivos FIT", "📂 Import FIT files")))
+                .add_sized(
+                    [ui.available_width(), 28.0],
+                    egui::Button::new(tr!("📂 Importar arquivos FIT", "📂 Import FIT files")),
+                )
                 .clicked()
             {
                 self.import_picked_files();
@@ -448,14 +481,20 @@ impl App {
             let frac = if total > 0 { done as f32 / total as f32 } else { 0.0 };
             ui.label(RichText::new(current).small().color(ui.visuals().weak_text_color()));
             ui.add(egui::ProgressBar::new(frac).text(format!("{label} {done}/{total}")));
-        } else if let Some(r) = &self.last_report {
-            if !r.errors.is_empty()
-                && ui
-                    .link(RichText::new(trf!("⚠ {} arquivo(s) com erro", "⚠ {} file(s) with errors", r.errors.len())).color(widgets::WARN))
-                    .clicked()
-            {
-                self.show_report = true;
-            }
+        } else if let Some(r) = &self.last_report
+            && !r.errors.is_empty()
+            && ui
+                .link(
+                    RichText::new(trf!(
+                        "⚠ {} arquivo(s) com erro",
+                        "⚠ {} file(s) with errors",
+                        r.errors.len()
+                    ))
+                    .color(widgets::WARN),
+                )
+                .clicked()
+        {
+            self.show_report = true;
         }
     }
 
@@ -464,17 +503,19 @@ impl App {
         match crate::update::estado() {
             Estado::Disponivel(v) => {
                 ui.horizontal_wrapped(|ui| {
-                    if v.instalavel() {
-                        if ui
-                            .link(RichText::new(trf!("⬆ Atualizar para v{}", "⬆ Update to v{}", v.numero)).color(widgets::ACCENT))
+                    if v.instalavel()
+                        && ui
+                            .link(
+                                RichText::new(trf!("⬆ Atualizar para v{}", "⬆ Update to v{}", v.numero))
+                                    .color(widgets::ACCENT),
+                            )
                             .on_hover_text(tr!(
                                 "Baixa a versão nova do GitHub, confere o SHA-256 e reabre o app.",
                                 "Downloads the new version from GitHub, checks its SHA-256 and reopens the app."
                             ))
                             .clicked()
-                        {
-                            crate::update::instalar(v.clone());
-                        }
+                    {
+                        crate::update::instalar(v.clone());
                     }
                     ui.hyperlink_to(tr!("novidades", "what's new"), &v.pagina);
                 });
@@ -503,11 +544,19 @@ impl App {
             .anchor(egui::Align2::RIGHT_BOTTOM, [-16.0, -16.0])
             .show(ctx, |ui| {
                 for t in &self.toasts {
-                    let fill = if t.error { widgets::BAD.gamma_multiply(0.85) } else { widgets::ACCENT.gamma_multiply(0.85) };
-                    egui::Frame::new().fill(fill).corner_radius(8.0).inner_margin(10.0).show(ui, |ui| {
-                        ui.set_max_width(380.0);
-                        ui.label(RichText::new(&t.text).color(Color32::WHITE));
-                    });
+                    let fill = if t.error {
+                        widgets::BAD.gamma_multiply(0.85)
+                    } else {
+                        widgets::ACCENT.gamma_multiply(0.85)
+                    };
+                    egui::Frame::new()
+                        .fill(fill)
+                        .corner_radius(8.0)
+                        .inner_margin(10.0)
+                        .show(ui, |ui| {
+                            ui.set_max_width(380.0);
+                            ui.label(RichText::new(&t.text).color(Color32::WHITE));
+                        });
                     ui.add_space(6.0);
                 }
             });
@@ -566,7 +615,11 @@ impl App {
             ("dashboard".to_string(), Page::Dashboard, None),
             ("activities".into(), Page::Activities(None), None),
         ];
-        let run = self.data.activities.iter().find(|a| a.modality == Modality::RoadRun && a.has_gps);
+        let run = self
+            .data
+            .activities
+            .iter()
+            .find(|a| a.modality == Modality::RoadRun && a.has_gps);
         if let Some(a) = run {
             for (name, tab) in [
                 ("activity-charts", activity::Tab::Charts),
@@ -580,7 +633,11 @@ impl App {
             }
         }
         if let Some(t) = self.data.activities.iter().find(|a| a.modality == Modality::Tennis) {
-            v.push(("activity-tennis".into(), Page::Activity(t.id), Some(activity::Tab::Charts)));
+            v.push((
+                "activity-tennis".into(),
+                Page::Activity(t.id),
+                Some(activity::Tab::Charts),
+            ));
         }
         v.extend([
             ("tennis".into(), Page::Activities(Some(Modality::Tennis)), None),

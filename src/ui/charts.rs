@@ -4,7 +4,7 @@
 
 use crate::format;
 use eframe::egui::{self, Color32, Ui};
-use egui_plot::{Bar, BarChart, GridMark, HoverPosition, Legend, Line, Plot, PlotPoints, Points};
+use egui_plot::{Bar, BarChart, GridInput, GridMark, HoverPosition, Legend, Line, Plot, PlotPoints, Points};
 use std::ops::RangeInclusive;
 
 #[derive(Debug, Clone, Copy, PartialEq)]
@@ -60,6 +60,55 @@ impl Axis {
     }
 }
 
+/// Grid marks at "nice" steps (about `target` labels): 1-2-5 for numbers,
+/// 15 s / 30 s / 1 min... for pace and time.
+fn nice_marks(input: GridInput, axis: Axis, target: f64) -> Vec<GridMark> {
+    let (lo, hi) = input.bounds;
+    let span = hi - lo;
+    if !(span.is_finite() && span > 0.0) {
+        return Vec::new();
+    }
+    let raw = span / target;
+    let step = match axis {
+        Axis::Pace | Axis::Time => [
+            1.0, 5.0, 10.0, 15.0, 30.0, 60.0, 120.0, 300.0, 600.0, 900.0, 1800.0, 3600.0, 7200.0,
+        ]
+        .into_iter()
+        .find(|s| *s >= raw)
+        .unwrap_or_else(|| (raw / 3600.0).ceil() * 3600.0),
+        Axis::Date => [1.0, 2.0, 7.0, 14.0, 28.0, 56.0, 91.0, 182.0, 365.0]
+            .into_iter()
+            .find(|s| *s >= raw)
+            .unwrap_or_else(|| (raw / 365.0).ceil() * 365.0),
+        Axis::Distance => {
+            let mag = 10f64.powf(raw.log10().floor());
+            [1.0, 2.0, 5.0, 10.0]
+                .into_iter()
+                .map(|k| k * mag)
+                .find(|s| *s >= raw)
+                .unwrap_or(10.0 * mag)
+        }
+        _ => {
+            let mag = 10f64.powf(raw.log10().floor());
+            [1.0, 2.0, 2.5, 5.0, 10.0]
+                .into_iter()
+                .map(|k| k * mag)
+                .find(|s| *s >= raw)
+                .unwrap_or(10.0 * mag)
+        }
+    };
+    let mut out = Vec::new();
+    let mut v = (lo / step).ceil() * step;
+    while v <= hi && out.len() < 200 {
+        out.push(GridMark {
+            value: v,
+            step_size: step,
+        });
+        v += step;
+    }
+    out
+}
+
 pub fn date_to_x(d: chrono::NaiveDate) -> f64 {
     (d.num_days_from_ce() - 719_163) as f64
 }
@@ -76,17 +125,28 @@ pub struct Series {
 
 impl Series {
     pub fn line(name: impl Into<String>, color: Color32, points: Vec<[f64; 2]>) -> Self {
-        Series { name: name.into(), color, points, dots: false }
+        Series {
+            name: name.into(),
+            color,
+            points,
+            dots: false,
+        }
     }
 
     pub fn dots(name: impl Into<String>, color: Color32, points: Vec<[f64; 2]>) -> Self {
-        Series { name: name.into(), color, points, dots: true }
+        Series {
+            name: name.into(),
+            color,
+            points,
+            dots: true,
+        }
     }
 }
 
 pub struct ChartOpts<'a> {
     pub id: &'a str,
     pub height: f32,
+    pub invert_x: bool,
     pub x: Axis,
     pub y: Axis,
     /// Charts with the same group share cursor and x axis.
@@ -100,7 +160,18 @@ pub struct ChartOpts<'a> {
 
 impl<'a> ChartOpts<'a> {
     pub fn new(id: &'a str, x: Axis, y: Axis) -> Self {
-        ChartOpts { id, height: 180.0, x, y, link: None, invert_y: false, legend: false, title: None, hlines: Vec::new() }
+        ChartOpts {
+            id,
+            height: 180.0,
+            invert_x: false,
+            x,
+            y,
+            link: None,
+            invert_y: false,
+            legend: false,
+            title: None,
+            hlines: Vec::new(),
+        }
     }
 }
 
@@ -146,19 +217,30 @@ pub fn line_chart(ui: &mut Ui, opts: ChartOpts<'_>, series: Vec<Series>) {
         .allow_drag(egui::Vec2b::new(true, false))
         .allow_zoom(egui::Vec2b::new(true, false))
         .invert_y(opts.invert_y)
+        .invert_x(opts.invert_x)
         .x_axis_formatter(move |m: GridMark, _r: &RangeInclusive<f64>| xa.tick(m.value))
         .y_axis_formatter(move |m: GridMark, _r: &RangeInclusive<f64>| ya.tick(m.value))
         .y_axis_min_width(40.0)
+        .y_grid_spacer(move |g| nice_marks(g, ya, 4.0))
+        .x_grid_spacer(move |g| nice_marks(g, xa, 7.0))
         .label_formatter(move |pos: &HoverPosition<'_>| match pos {
-            HoverPosition::NearDataPoint { plot_name, position, .. } => {
-                let name = if plot_name.is_empty() { String::new() } else { format!("{plot_name}\n") };
+            HoverPosition::NearDataPoint {
+                plot_name, position, ..
+            } => {
+                let name = if plot_name.is_empty() {
+                    String::new()
+                } else {
+                    format!("{plot_name}\n")
+                };
                 Some(format!("{name}{}\n{}", ya.fmt(position.y), xa.fmt(position.x)))
             }
             HoverPosition::Elsewhere { position } => Some(xa.fmt(position.x)),
         });
     if let Some(group) = opts.link {
         let group = egui::Id::new(group);
-        plot = plot.link_cursor(group, egui::Vec2b::new(true, false)).link_axis(group, egui::Vec2b::new(true, false));
+        plot = plot
+            .link_cursor(group, egui::Vec2b::new(true, false))
+            .link_axis(group, egui::Vec2b::new(true, false));
     }
     if opts.legend {
         plot = plot.legend(Legend::default());
@@ -168,13 +250,22 @@ pub fn line_chart(ui: &mut Ui, opts: ChartOpts<'_>, series: Vec<Series>) {
         for s in series {
             let pts = downsample(&s.points, 2500);
             if s.dots {
-                p.points(Points::new(s.name, PlotPoints::new(pts)).color(s.color).radius(3.5).filled(true));
+                p.points(
+                    Points::new(s.name, PlotPoints::new(pts))
+                        .color(s.color)
+                        .radius(3.5)
+                        .filled(true),
+                );
             } else {
                 p.line(Line::new(s.name, PlotPoints::new(pts)).color(s.color).width(1.6));
             }
         }
         for (v, label) in hlines {
-            p.hline(egui_plot::HLine::new(label, v).color(Color32::GRAY).style(egui_plot::LineStyle::dashed_loose()));
+            p.hline(
+                egui_plot::HLine::new(label, v)
+                    .color(Color32::GRAY)
+                    .style(egui_plot::LineStyle::dashed_loose()),
+            );
         }
     });
 }
@@ -190,7 +281,11 @@ pub fn bar_chart(ui: &mut Ui, opts: ChartOpts<'_>, bars: Vec<(f64, f64, Color32,
         .map(|(x, h, c, name)| Bar::new(x, h).fill(c).width(bar_width).name(name))
         .collect();
     let chart = BarChart::new("", items).element_formatter(Box::new(move |b: &Bar, _c: &BarChart| {
-        let label = if b.name.is_empty() { xa.fmt(b.argument) } else { b.name.clone() };
+        let label = if b.name.is_empty() {
+            xa.fmt(b.argument)
+        } else {
+            b.name.clone()
+        };
         format!("{label}\n{}", ya.fmt(b.value))
     }));
     let mut plot = Plot::new(egui::Id::new(opts.id))
@@ -202,6 +297,7 @@ pub fn bar_chart(ui: &mut Ui, opts: ChartOpts<'_>, bars: Vec<(f64, f64, Color32,
         .x_axis_formatter(move |m: GridMark, _r: &RangeInclusive<f64>| xa.tick(m.value))
         .y_axis_formatter(move |m: GridMark, _r: &RangeInclusive<f64>| ya.tick(m.value))
         .y_axis_min_width(40.0)
+        .y_grid_spacer(move |g| nice_marks(g, ya, 4.0))
         .include_y(0.0)
         .label_formatter(|_| None);
     if let Some(group) = opts.link {
@@ -211,7 +307,11 @@ pub fn bar_chart(ui: &mut Ui, opts: ChartOpts<'_>, bars: Vec<(f64, f64, Color32,
     plot.show(ui, |p| {
         p.bar_chart(chart);
         for (v, label) in hlines {
-            p.hline(egui_plot::HLine::new(label, v).color(Color32::GRAY).style(egui_plot::LineStyle::dashed_loose()));
+            p.hline(
+                egui_plot::HLine::new(label, v)
+                    .color(Color32::GRAY)
+                    .style(egui_plot::LineStyle::dashed_loose()),
+            );
         }
     });
 }
@@ -241,7 +341,9 @@ mod tests {
 
     #[test]
     fn downsample_keeps_extremes() {
-        let pts: Vec<[f64; 2]> = (0..10_000).map(|i| [i as f64, if i == 5_000 { 999.0 } else { 1.0 }]).collect();
+        let pts: Vec<[f64; 2]> = (0..10_000)
+            .map(|i| [i as f64, if i == 5_000 { 999.0 } else { 1.0 }])
+            .collect();
         let d = downsample(&pts, 500);
         assert!(d.len() <= 502);
         assert!(d.iter().any(|p| p[1] == 999.0));

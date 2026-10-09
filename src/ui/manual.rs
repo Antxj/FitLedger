@@ -27,7 +27,11 @@ impl Default for State {
         let now = chrono::Local::now();
         State {
             loaded_for: None,
-            a: Activity { modality: Modality::Strength, source: "manual".into(), ..Default::default() },
+            a: Activity {
+                modality: Modality::Strength,
+                source: "manual".into(),
+                ..Default::default()
+            },
             date: now.date_naive(),
             time: now.format("%H:%M").to_string(),
             duration: "60".into(),
@@ -68,80 +72,118 @@ pub fn show(app: &mut App, ui: &mut Ui, id: Option<i64>) {
         if ui.button(tr!("← Voltar", "← Back")).clicked() {
             app.back();
         }
-        widgets::page_title(ui, if editing { tr!("Editar atividade manual", "Edit manual activity") } else { tr!("Nova atividade manual", "New manual activity") });
+        widgets::page_title(
+            ui,
+            if editing {
+                tr!("Editar atividade manual", "Edit manual activity")
+            } else {
+                tr!("Nova atividade manual", "New manual activity")
+            },
+        );
     });
     let s = &mut app.pages.manual;
     let mut save = false;
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-        egui::Grid::new("manual").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-            ui.label(tr!("Modalidade", "Type"));
-            ui.horizontal(|ui| {
-                for m in Modality::ALL {
-                    ui.selectable_value(&mut s.a.modality, m, m.label());
-                }
-            });
-            ui.end_row();
-            ui.label(tr!("Título (opcional)", "Title (optional)"));
-            let mut name = s.a.name.clone().unwrap_or_default();
-            if ui.add(egui::TextEdit::singleline(&mut name).desired_width(300.0)).changed() {
-                s.a.name = Some(name).filter(|n| !n.trim().is_empty());
-            }
-            ui.end_row();
-            ui.label(tr!("Data e horário", "Date and time"));
-            ui.horizontal(|ui| {
-                widgets::date_picker(ui, &mut s.date, "manual-date");
-                ui.add(egui::TextEdit::singleline(&mut s.time).desired_width(60.0).hint_text("07:00"));
-            });
-            ui.end_row();
-            ui.label(tr!("Duração", "Duration"));
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut s.duration).desired_width(80.0));
-                ui.label(weak(ui, tr!("minutos ou h:mm:ss", "minutes or h:mm:ss")));
-            });
-            ui.end_row();
-            if s.a.modality != Modality::Strength {
-                ui.label(tr!("Distância (km)", "Distance (km)"));
-                ui.add(egui::TextEdit::singleline(&mut s.distance).desired_width(80.0));
-                ui.end_row();
-            }
-            if s.a.modality == Modality::Treadmill {
-                ui.label(tr!("Inclinação (%)", "Incline (%)"));
-                ui.add(egui::TextEdit::singleline(&mut s.incline).desired_width(80.0));
-                ui.end_row();
-            }
-            ui.label(tr!("Calorias", "Calories"));
-            ui.add(egui::TextEdit::singleline(&mut s.calories).desired_width(80.0));
-            ui.end_row();
-            ui.label(tr!("FC média / máxima", "Avg / max HR"));
-            ui.horizontal(|ui| {
-                ui.add(egui::TextEdit::singleline(&mut s.avg_hr).desired_width(60.0).hint_text(tr!("méd", "avg")));
-                ui.add(egui::TextEdit::singleline(&mut s.max_hr).desired_width(60.0).hint_text(tr!("máx", "max")));
-                ui.label("bpm");
-            });
-            ui.end_row();
-            ui.label(tr!("RPE (1–10)", "RPE (1–10)"));
-            ui.horizontal(|ui| {
-                if ui.selectable_label(s.a.rpe.is_none(), "—").clicked() {
-                    s.a.rpe = None;
-                }
-                for i in 1..=10 {
-                    if ui.selectable_label(s.a.rpe == Some(i), i.to_string()).clicked() {
-                        s.a.rpe = Some(i);
+        egui::Grid::new("manual")
+            .num_columns(2)
+            .spacing([12.0, 8.0])
+            .show(ui, |ui| {
+                ui.label(tr!("Modalidade", "Type"));
+                ui.horizontal(|ui| {
+                    for m in Modality::ALL {
+                        ui.selectable_value(&mut s.a.modality, m, m.label());
                     }
+                });
+                ui.end_row();
+                ui.label(tr!("Título (opcional)", "Title (optional)"));
+                let mut name = s.a.name.clone().unwrap_or_default();
+                if ui
+                    .add(egui::TextEdit::singleline(&mut name).desired_width(300.0))
+                    .changed()
+                {
+                    s.a.name = Some(name).filter(|n| !n.trim().is_empty());
                 }
+                ui.end_row();
+                ui.label(tr!("Data e horário", "Date and time"));
+                ui.horizontal(|ui| {
+                    widgets::date_picker(ui, &mut s.date, "manual-date");
+                    ui.add(
+                        egui::TextEdit::singleline(&mut s.time)
+                            .desired_width(60.0)
+                            .hint_text("07:00"),
+                    );
+                });
+                ui.end_row();
+                ui.label(tr!("Duração", "Duration"));
+                ui.horizontal(|ui| {
+                    ui.add(egui::TextEdit::singleline(&mut s.duration).desired_width(80.0));
+                    ui.label(weak(ui, tr!("minutos ou h:mm:ss", "minutes or h:mm:ss")));
+                });
+                ui.end_row();
+                if s.a.modality != Modality::Strength {
+                    ui.label(tr!("Distância (km)", "Distance (km)"));
+                    ui.add(egui::TextEdit::singleline(&mut s.distance).desired_width(80.0));
+                    ui.end_row();
+                }
+                if s.a.modality == Modality::Treadmill {
+                    ui.label(tr!("Inclinação (%)", "Incline (%)"));
+                    ui.add(egui::TextEdit::singleline(&mut s.incline).desired_width(80.0));
+                    ui.end_row();
+                }
+                ui.label(tr!("Calorias", "Calories"));
+                ui.add(egui::TextEdit::singleline(&mut s.calories).desired_width(80.0));
+                ui.end_row();
+                ui.label(tr!("FC média / máxima", "Avg / max HR"));
+                ui.horizontal(|ui| {
+                    ui.add(
+                        egui::TextEdit::singleline(&mut s.avg_hr)
+                            .desired_width(60.0)
+                            .hint_text(tr!("méd", "avg")),
+                    );
+                    ui.add(
+                        egui::TextEdit::singleline(&mut s.max_hr)
+                            .desired_width(60.0)
+                            .hint_text(tr!("máx", "max")),
+                    );
+                    ui.label("bpm");
+                });
+                ui.end_row();
+                ui.label(tr!("RPE (1–10)", "RPE (1–10)"));
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(s.a.rpe.is_none(), "—").clicked() {
+                        s.a.rpe = None;
+                    }
+                    for i in 1..=10 {
+                        if ui.selectable_label(s.a.rpe == Some(i), i.to_string()).clicked() {
+                            s.a.rpe = Some(i);
+                        }
+                    }
+                });
+                ui.end_row();
+                ui.label(tr!("Observações", "Notes"));
+                let mut notes = s.a.notes.clone().unwrap_or_default();
+                if ui
+                    .add(
+                        egui::TextEdit::multiline(&mut notes)
+                            .desired_rows(3)
+                            .desired_width(380.0),
+                    )
+                    .changed()
+                {
+                    s.a.notes = Some(notes).filter(|n| !n.trim().is_empty());
+                }
+                ui.end_row();
             });
-            ui.end_row();
-            ui.label(tr!("Observações", "Notes"));
-            let mut notes = s.a.notes.clone().unwrap_or_default();
-            if ui.add(egui::TextEdit::multiline(&mut notes).desired_rows(3).desired_width(380.0)).changed() {
-                s.a.notes = Some(notes).filter(|n| !n.trim().is_empty());
-            }
-            ui.end_row();
-        });
-        ui.label(weak(ui, tr!(
-            "Sem FC, a carga é estimada por RPE × minutos (ou esforço moderado, se não houver RPE).",
-            "Without HR, load is estimated as RPE × minutes (or a moderate effort when there is no RPE)."
-        )).small());
+        ui.label(
+            weak(
+                ui,
+                tr!(
+                    "Sem FC, a carga é estimada por RPE × minutos (ou esforço moderado, se não houver RPE).",
+                    "Without HR, load is estimated as RPE × minutes (or a moderate effort when there is no RPE)."
+                ),
+            )
+            .small(),
+        );
         if s.a.modality == Modality::Strength {
             ui.label(weak(ui, tr!(
                 "Os exercícios (séries × repetições × peso) são adicionados depois de salvar, na tela da atividade.",
@@ -162,7 +204,8 @@ pub fn show(app: &mut App, ui: &mut Ui, id: Option<i64>) {
             s.error = Some(tr!("Informe a duração.", "Enter the duration.").into());
             return;
         };
-        let time = NaiveTime::parse_from_str(s.time.trim(), "%H:%M").unwrap_or_else(|_| NaiveTime::from_hms_opt(12, 0, 0).unwrap());
+        let time = NaiveTime::parse_from_str(s.time.trim(), "%H:%M")
+            .unwrap_or_else(|_| NaiveTime::from_hms_opt(12, 0, 0).unwrap());
         let local = s.date.and_time(time);
         let offset = crate::db::local_offset_at(local.and_utc().timestamp());
         let mut a = s.a.clone();

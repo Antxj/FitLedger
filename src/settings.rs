@@ -135,7 +135,10 @@ mod tests {
 
     #[test]
     fn zones_by_max_hr() {
-        let s = Settings { hr_max: Some(200.0), ..Default::default() };
+        let s = Settings {
+            hr_max: Some(200.0),
+            ..Default::default()
+        };
         let z = s.zones(None);
         assert_eq!(z.lower, [100.0, 120.0, 140.0, 160.0, 180.0]);
         assert_eq!(z.zone_of(99.0), 0);
@@ -163,7 +166,10 @@ mod tests {
         let s = Settings::default();
         assert_eq!(s.effective_hr_max(None), 190.0);
         assert_eq!(s.effective_hr_max(Some(196.0)), 196.0);
-        let s = Settings { age: Some(40), ..Default::default() };
+        let s = Settings {
+            age: Some(40),
+            ..Default::default()
+        };
         assert_eq!(s.effective_hr_max(None), 180.0);
         assert_eq!(s.effective_hr_max(Some(196.0)), 196.0);
     }

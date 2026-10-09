@@ -45,9 +45,7 @@ impl Metrics {
     /// Hard session: lots of time in zones 4–5, or high load per minute, or RPE ≥ 8.
     pub fn is_hard(&self, a: &Activity) -> bool {
         let minutes = a.duration().unwrap_or(0.0) / 60.0;
-        self.hard_share >= 0.25
-            || (minutes > 0.0 && self.load / minutes >= 2.2)
-            || a.rpe.is_some_and(|r| r >= 8)
+        self.hard_share >= 0.25 || (minutes > 0.0 && self.load / minutes >= 2.2) || a.rpe.is_some_and(|r| r >= 8)
     }
 }
 
@@ -61,7 +59,20 @@ pub fn distance_scale(a: &Activity) -> f64 {
 
 pub fn stream_for(db: &Db, a: &Activity) -> rusqlite::Result<Stream> {
     let samples = db.samples(a.id)?;
-    Ok(Stream::build(&samples, a.modality, distance_scale(a)))
+    let mut scale = distance_scale(a);
+    // Watches often stop the per-second distance a few meters short of the
+    // session total (e.g. 4 989 m vs 5 013 m). Small gaps are aligned to the
+    // session total, so a 5 km run has a 5 km split and a 5 km record.
+    if a.distance_override_m.is_none() {
+        let last = samples.iter().rev().find_map(|s| s.distance).filter(|d| *d > 0.0);
+        if let (Some(total), Some(last)) = (a.distance_m, last) {
+            let r = total / last;
+            if (0.97..=1.03).contains(&r) {
+                scale = r;
+            }
+        }
+    }
+    Ok(Stream::build(&samples, a.modality, scale))
 }
 
 pub fn compute(a: &Activity, st: &Stream, settings: &Settings, observed_max: Option<f64>) -> Metrics {
@@ -111,7 +122,12 @@ pub fn compute(a: &Activity, st: &Stream, settings: &Settings, observed_max: Opt
 }
 
 /// Computes and stores the metrics (and best efforts) of one activity.
-pub fn update_activity(db: &Db, a: &Activity, settings: &Settings, observed_max: Option<f64>) -> rusqlite::Result<Metrics> {
+pub fn update_activity(
+    db: &Db,
+    a: &Activity,
+    settings: &Settings,
+    observed_max: Option<f64>,
+) -> rusqlite::Result<Metrics> {
     let st = stream_for(db, a)?;
     let m = compute(a, &st, settings, observed_max);
     let json = serde_json::to_string(&m).unwrap_or_else(|_| "{}".into());
@@ -133,7 +149,10 @@ pub fn update_activity(db: &Db, a: &Activity, settings: &Settings, observed_max:
         ],
     )?;
     if m.moving_s.is_some() && a.source == "fit" {
-        tx.execute("UPDATE activity SET moving_s = ?2 WHERE id = ?1", params![a.id, m.moving_s])?;
+        tx.execute(
+            "UPDATE activity SET moving_s = ?2 WHERE id = ?1",
+            params![a.id, m.moving_s],
+        )?;
     }
     tx.execute("DELETE FROM best_effort WHERE activity_id = ?1", [a.id])?;
     if a.modality.is_run() {
@@ -150,11 +169,14 @@ pub fn update_activity(db: &Db, a: &Activity, settings: &Settings, observed_max:
     Ok(m)
 }
 
+#[cfg(test)]
 pub fn load_metrics(db: &Db, activity_id: i64) -> Option<Metrics> {
     db.conn
-        .query_row("SELECT json FROM activity_metrics WHERE activity_id = ?1", [activity_id], |r| {
-            r.get::<_, String>(0)
-        })
+        .query_row(
+            "SELECT json FROM activity_metrics WHERE activity_id = ?1",
+            [activity_id],
+            |r| r.get::<_, String>(0),
+        )
         .ok()
         .and_then(|j| serde_json::from_str(&j).ok())
 }
@@ -162,12 +184,12 @@ pub fn load_metrics(db: &Db, activity_id: i64) -> Option<Metrics> {
 /// All metrics, keyed by activity id (for pages that look at many activities).
 pub fn all_metrics(db: &Db) -> std::collections::HashMap<i64, Metrics> {
     let mut out = std::collections::HashMap::new();
-    if let Ok(mut st) = db.conn.prepare("SELECT activity_id, json FROM activity_metrics") {
-        if let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?))) {
-            for (id, j) in rows.flatten() {
-                if let Ok(m) = serde_json::from_str(&j) {
-                    out.insert(id, m);
-                }
+    if let Ok(mut st) = db.conn.prepare("SELECT activity_id, json FROM activity_metrics")
+        && let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, String>(1)?)))
+    {
+        for (id, j) in rows.flatten() {
+            if let Ok(m) = serde_json::from_str(&j) {
+                out.insert(id, m);
             }
         }
     }

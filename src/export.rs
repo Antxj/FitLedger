@@ -19,7 +19,14 @@ pub enum What {
 }
 
 impl What {
-    pub const ALL: [What; 6] = [What::All, What::Runs, What::Strength, What::Tennis, What::Goals, What::Monthly];
+    pub const ALL: [What; 6] = [
+        What::All,
+        What::Runs,
+        What::Strength,
+        What::Tennis,
+        What::Goals,
+        What::Monthly,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -71,7 +78,10 @@ fn activity_row(a: &Activity, m: Option<&Metrics>) -> Vec<Value> {
         round(a.distance().map(|d| d / 1000.0), 3),
         round(a.duration(), 0),
         round(a.elapsed_s, 0),
-        a.pace_s_per_km().filter(|_| a.modality.is_run()).map(|p| json!(crate::format::pace(p))).unwrap_or(Value::Null),
+        a.pace_s_per_km()
+            .filter(|_| a.modality.is_run())
+            .map(|p| json!(crate::format::pace(p)))
+            .unwrap_or(Value::Null),
         round(a.avg_speed.map(|v| v * 3.6), 2),
         round(a.avg_hr, 0),
         round(a.max_hr, 0),
@@ -80,7 +90,7 @@ fn activity_row(a: &Activity, m: Option<&Metrics>) -> Vec<Value> {
         round(a.descent_m.or(m.and_then(|m| m.loss_m)), 0),
         round(a.calories, 0),
         round(m.map(|m| m.load), 0),
-        round(m.and_then(|m| m.drift.as_ref()).and_then(|d| d.decoupling_pct), 1),
+        round(a.drift_pct, 1),
         round(a.incline_pct, 1),
         json!(a.rpe),
         json!(a.sleep_quality),
@@ -127,14 +137,22 @@ pub fn build(db: &Db, what: What, acts: &[Activity], metrics: &HashMap<i64, Metr
     let pick = |f: &dyn Fn(Modality) -> bool| -> Table {
         let mut rows: Vec<&Activity> = acts.iter().filter(|a| f(a.modality)).collect();
         rows.sort_by_key(|a| a.start_time);
-        Table { header: ACTIVITY_HEADER.to_vec(), rows: rows.iter().map(|a| activity_row(a, metrics.get(&a.id))).collect() }
+        Table {
+            header: ACTIVITY_HEADER.to_vec(),
+            rows: rows.iter().map(|a| activity_row(a, metrics.get(&a.id))).collect(),
+        }
     };
     match what {
         What::All => pick(&|_| true),
         What::Runs => pick(&|m| m.is_run()),
         What::Tennis => pick(&|m| m == Modality::Tennis),
         What::Strength => {
-            let names: HashMap<i64, String> = db.exercises().unwrap_or_default().into_iter().map(|e| (e.id, e.name)).collect();
+            let names: HashMap<i64, String> = db
+                .exercises()
+                .unwrap_or_default()
+                .into_iter()
+                .map(|e| (e.id, e.name))
+                .collect();
             let mut rows = Vec::new();
             let mut strength: Vec<&Activity> = acts.iter().filter(|a| a.modality == Modality::Strength).collect();
             strength.sort_by_key(|a| a.start_time);
@@ -170,7 +188,18 @@ pub fn build(db: &Db, what: What, acts: &[Activity], metrics: &HashMap<i64, Metr
                 }
             }
             Table {
-                header: vec!["activity_id", "date", "exercise", "sets", "reps", "weight_kg", "volume_kg", "rpe", "rest_s", "notes"],
+                header: vec![
+                    "activity_id",
+                    "date",
+                    "exercise",
+                    "sets",
+                    "reps",
+                    "weight_kg",
+                    "volume_kg",
+                    "rpe",
+                    "rest_s",
+                    "notes",
+                ],
                 rows,
             }
         }
@@ -187,7 +216,9 @@ pub fn build(db: &Db, what: What, acts: &[Activity], metrics: &HashMap<i64, Metr
                         json!(g.id),
                         json!(g.title),
                         json!(g.kind.code()),
-                        json!(serde_json::to_value(&g.params).unwrap_or(Value::Null)).to_string().into(),
+                        json!(serde_json::to_value(&g.params).unwrap_or(Value::Null))
+                            .to_string()
+                            .into(),
                         json!(g.start_date.map(crate::planning::date_str)),
                         json!(g.end_date.map(crate::planning::date_str)),
                         json!(g.objective_id),
@@ -199,7 +230,19 @@ pub fn build(db: &Db, what: What, acts: &[Activity], metrics: &HashMap<i64, Metr
                 })
                 .collect();
             Table {
-                header: vec!["id", "title", "kind", "params", "start", "end", "objective_id", "progress_pct", "done", "status", "archived"],
+                header: vec![
+                    "id",
+                    "title",
+                    "kind",
+                    "params",
+                    "start",
+                    "end",
+                    "objective_id",
+                    "progress_pct",
+                    "done",
+                    "status",
+                    "archived",
+                ],
                 rows,
             }
         }
@@ -215,7 +258,9 @@ pub fn build(db: &Db, what: What, acts: &[Activity], metrics: &HashMap<i64, Metr
                         json!(t.sessions),
                         round(Some(t.run_km), 2),
                         round(Some(t.hours), 2),
-                        t.avg_pace().map(|p| json!(crate::format::pace(p))).unwrap_or(Value::Null),
+                        t.avg_pace()
+                            .map(|p| json!(crate::format::pace(p)))
+                            .unwrap_or(Value::Null),
                         round(t.avg_hr(), 0),
                         round(Some(t.longest_km), 2),
                         json!(t.strength_sessions),
@@ -247,11 +292,15 @@ pub fn build(db: &Db, what: What, acts: &[Activity], metrics: &HashMap<i64, Metr
 
 pub fn best_efforts_map(db: &Db) -> HashMap<i64, Vec<(f64, f64)>> {
     let mut out: HashMap<i64, Vec<(f64, f64)>> = HashMap::new();
-    if let Ok(mut st) = db.conn.prepare("SELECT activity_id, distance_m, time_s FROM best_effort") {
-        if let Ok(rows) = st.query_map([], |r| Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?))) {
-            for (id, d, t) in rows.flatten() {
-                out.entry(id).or_default().push((d, t));
-            }
+    if let Ok(mut st) = db
+        .conn
+        .prepare("SELECT activity_id, distance_m, time_s FROM best_effort")
+        && let Ok(rows) = st.query_map([], |r| {
+            Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?))
+        })
+    {
+        for (id, d, t) in rows.flatten() {
+            out.entry(id).or_default().push((d, t));
         }
     }
     out
@@ -287,8 +336,12 @@ pub fn to_json(t: &Table) -> String {
         .rows
         .iter()
         .map(|r| {
-            let obj: serde_json::Map<String, Value> =
-                t.header.iter().zip(r.iter()).map(|(k, v)| (k.to_string(), v.clone())).collect();
+            let obj: serde_json::Map<String, Value> = t
+                .header
+                .iter()
+                .zip(r.iter())
+                .map(|(k, v)| (k.to_string(), v.clone()))
+                .collect();
             Value::Object(obj)
         })
         .collect();

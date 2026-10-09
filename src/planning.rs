@@ -89,10 +89,6 @@ impl RunType {
             RunType::Free => tr!("Corrida livre", "Free run"),
         }
     }
-
-    pub fn is_hard(self) -> bool {
-        matches!(self, RunType::Intervals | RunType::Tempo | RunType::Fartlek | RunType::Test | RunType::Progressive)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
@@ -107,7 +103,13 @@ pub enum StepKind {
 }
 
 impl StepKind {
-    pub const ALL: [StepKind; 5] = [StepKind::Warmup, StepKind::Work, StepKind::Recovery, StepKind::Cooldown, StepKind::Steady];
+    pub const ALL: [StepKind; 5] = [
+        StepKind::Warmup,
+        StepKind::Work,
+        StepKind::Recovery,
+        StepKind::Cooldown,
+        StepKind::Steady,
+    ];
 
     pub fn label(self) -> &'static str {
         match self {
@@ -142,19 +144,38 @@ pub enum Step {
 
 impl Step {
     pub fn block(kind: StepKind) -> Step {
-        Step::Block { kind, duration_s: None, distance_m: None, pace: None, hr_zone: None, note: String::new() }
+        Step::Block {
+            kind,
+            duration_s: None,
+            distance_m: None,
+            pace: None,
+            hr_zone: None,
+            note: String::new(),
+        }
     }
 
     /// (seconds, meters) of the whole step, when they can be computed from the targets.
     pub fn totals(&self) -> (f64, f64) {
         match self {
-            Step::Block { duration_s, distance_m, pace, .. } => {
-                let t = duration_s.or_else(|| Some(distance_m.as_ref()? / 1000.0 * pace.as_ref()?)).unwrap_or(0.0);
-                let d = distance_m.or_else(|| Some(duration_s.as_ref()? / pace.as_ref()? * 1000.0)).unwrap_or(0.0);
+            Step::Block {
+                duration_s,
+                distance_m,
+                pace,
+                ..
+            } => {
+                let t = duration_s
+                    .or_else(|| Some(distance_m.as_ref()? / 1000.0 * pace.as_ref()?))
+                    .unwrap_or(0.0);
+                let d = distance_m
+                    .or_else(|| Some(duration_s.as_ref()? / pace.as_ref()? * 1000.0))
+                    .unwrap_or(0.0);
                 (t, d)
             }
             Step::Repeat { times, steps } => {
-                let (t, d) = steps.iter().map(Step::totals).fold((0.0, 0.0), |a, b| (a.0 + b.0, a.1 + b.1));
+                let (t, d) = steps
+                    .iter()
+                    .map(Step::totals)
+                    .fold((0.0, 0.0), |a, b| (a.0 + b.0, a.1 + b.1));
                 (t * *times as f64, d * *times as f64)
             }
         }
@@ -162,7 +183,10 @@ impl Step {
 }
 
 pub fn steps_totals(steps: &[Step]) -> (f64, f64) {
-    steps.iter().map(Step::totals).fold((0.0, 0.0), |a, b| (a.0 + b.0, a.1 + b.1))
+    steps
+        .iter()
+        .map(Step::totals)
+        .fold((0.0, 0.0), |a, b| (a.0 + b.0, a.1 + b.1))
 }
 
 #[derive(Debug, Clone, PartialEq)]
@@ -252,8 +276,14 @@ pub enum GoalKind {
 }
 
 impl GoalKind {
-    pub const ALL: [GoalKind; 6] =
-        [GoalKind::Distance, GoalKind::Frequency, GoalKind::Performance, GoalKind::HeartRate, GoalKind::MaxDistance, GoalKind::Hours];
+    pub const ALL: [GoalKind; 6] = [
+        GoalKind::Distance,
+        GoalKind::Frequency,
+        GoalKind::Performance,
+        GoalKind::HeartRate,
+        GoalKind::MaxDistance,
+        GoalKind::Hours,
+    ];
 
     pub fn code(self) -> &'static str {
         match self {
@@ -455,7 +485,11 @@ impl Db {
             self.conn.execute(
                 "UPDATE plan SET name=?1, goal=?2, objectives=?3, start_date=?4, end_date=?5,
                     sessions_per_week=?6, modalities=?7 WHERE id=?8",
-                rusqlite::params_from_iter(args.iter().copied().chain(std::iter::once(&p.id as &dyn rusqlite::ToSql))),
+                rusqlite::params_from_iter(
+                    args.iter()
+                        .copied()
+                        .chain(std::iter::once(&p.id as &dyn rusqlite::ToSql)),
+                ),
             )?;
             Ok(p.id)
         }
@@ -469,19 +503,25 @@ impl Db {
 
     // planned workouts
     pub fn planned_workouts(&self, from: NaiveDate, to: NaiveDate) -> Result<Vec<PlannedWorkout>> {
-        let mut st = self.conn.prepare(&format!("{PW_SELECT} WHERE date BETWEEN ?1 AND ?2 ORDER BY date, id"))?;
+        let mut st = self
+            .conn
+            .prepare(&format!("{PW_SELECT} WHERE date BETWEEN ?1 AND ?2 ORDER BY date, id"))?;
         let rows = st.query_map([date_str(from), date_str(to)], pw_from_row)?;
         rows.collect()
     }
 
     pub fn planned_workouts_of_plan(&self, plan_id: i64) -> Result<Vec<PlannedWorkout>> {
-        let mut st = self.conn.prepare(&format!("{PW_SELECT} WHERE plan_id = ?1 ORDER BY date, id"))?;
+        let mut st = self
+            .conn
+            .prepare(&format!("{PW_SELECT} WHERE plan_id = ?1 ORDER BY date, id"))?;
         let rows = st.query_map([plan_id], pw_from_row)?;
         rows.collect()
     }
 
     pub fn planned_workout(&self, id: i64) -> Result<Option<PlannedWorkout>> {
-        self.conn.query_row(&format!("{PW_SELECT} WHERE id = ?1"), [id], pw_from_row).optional()
+        self.conn
+            .query_row(&format!("{PW_SELECT} WHERE id = ?1"), [id], pw_from_row)
+            .optional()
     }
 
     pub fn save_planned_workout(&self, w: &PlannedWorkout) -> Result<i64> {
@@ -516,7 +556,11 @@ impl Db {
                 "UPDATE planned_workout SET plan_id=?1, date=?2, modality=?3, run_type=?4, title=?5, duration_s=?6,
                     distance_m=?7, target_pace=?8, target_hr=?9, target_zone=?10, incline_pct=?11, notes=?12,
                     steps=?13, activity_id=?14, reference_test_id=?15 WHERE id=?16",
-                rusqlite::params_from_iter(vals.iter().copied().chain(std::iter::once(&w.id as &dyn rusqlite::ToSql))),
+                rusqlite::params_from_iter(
+                    vals.iter()
+                        .copied()
+                        .chain(std::iter::once(&w.id as &dyn rusqlite::ToSql)),
+                ),
             )?;
             Ok(w.id)
         }
@@ -524,11 +568,6 @@ impl Db {
 
     pub fn delete_planned_workout(&self, id: i64) -> Result<()> {
         self.conn.execute("DELETE FROM planned_workout WHERE id = ?1", [id])?;
-        Ok(())
-    }
-
-    pub fn link_planned_workout(&self, id: i64, activity_id: Option<i64>) -> Result<()> {
-        self.conn.execute("UPDATE planned_workout SET activity_id = ?2 WHERE id = ?1", params![id, activity_id])?;
         Ok(())
     }
 
@@ -556,7 +595,14 @@ impl Db {
             self.conn.execute(
                 "INSERT INTO reference_test(name, modality, distance_m, target_pace, incline_pct, notes)
                  VALUES(?1,?2,?3,?4,?5,?6)",
-                params![t.name, t.modality.code(), t.distance_m, t.target_pace, t.incline_pct, t.notes],
+                params![
+                    t.name,
+                    t.modality.code(),
+                    t.distance_m,
+                    t.target_pace,
+                    t.incline_pct,
+                    t.notes
+                ],
             )?;
             Ok(self.conn.last_insert_rowid())
         } else {
@@ -675,7 +721,9 @@ impl Db {
     }
 
     pub fn objectives(&self) -> Result<Vec<Objective>> {
-        let mut st = self.conn.prepare("SELECT id, title, description, target_date FROM objective ORDER BY id")?;
+        let mut st = self
+            .conn
+            .prepare("SELECT id, title, description, target_date FROM objective ORDER BY id")?;
         let rows = st.query_map([], |r| {
             Ok(Objective {
                 id: r.get(0)?,
@@ -711,7 +759,9 @@ impl Db {
 
     // strength
     pub fn exercises(&self) -> Result<Vec<Exercise>> {
-        let mut st = self.conn.prepare("SELECT id, name, muscle_group, archived FROM exercise ORDER BY archived, name")?;
+        let mut st = self
+            .conn
+            .prepare("SELECT id, name, muscle_group, archived FROM exercise ORDER BY archived, name")?;
         let rows = st.query_map([], |r| {
             Ok(Exercise {
                 id: r.get(0)?,
@@ -755,7 +805,9 @@ impl Db {
     }
 
     pub fn set_groups(&self, activity_id: i64) -> Result<Vec<SetGroup>> {
-        let mut st = self.conn.prepare(&format!("{SG_SELECT} WHERE activity_id = ?1 ORDER BY position, id"))?;
+        let mut st = self
+            .conn
+            .prepare(&format!("{SG_SELECT} WHERE activity_id = ?1 ORDER BY position, id"))?;
         let rows = st.query_map([activity_id], sg_from_row)?;
         rows.collect()
     }
@@ -833,7 +885,10 @@ fn pw_from_row(r: &rusqlite::Row) -> Result<PlannedWorkout> {
         target_zone: r.get(10)?,
         incline_pct: r.get(11)?,
         notes: r.get::<_, Option<String>>(12)?.unwrap_or_default(),
-        steps: r.get::<_, Option<String>>(13)?.and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default(),
+        steps: r
+            .get::<_, Option<String>>(13)?
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default(),
         activity_id: r.get(14)?,
         reference_test_id: r.get(15)?,
     })
@@ -869,15 +924,43 @@ mod tests {
     fn interval_totals() {
         // 10 min @7:00 + 5 × (3 min @5:30 + 2 min @7:30) + 10 min easy
         let steps = vec![
-            Step::Block { kind: StepKind::Warmup, duration_s: Some(600.0), distance_m: None, pace: Some(420.0), hr_zone: None, note: String::new() },
+            Step::Block {
+                kind: StepKind::Warmup,
+                duration_s: Some(600.0),
+                distance_m: None,
+                pace: Some(420.0),
+                hr_zone: None,
+                note: String::new(),
+            },
             Step::Repeat {
                 times: 5,
                 steps: vec![
-                    Step::Block { kind: StepKind::Work, duration_s: Some(180.0), distance_m: None, pace: Some(330.0), hr_zone: None, note: String::new() },
-                    Step::Block { kind: StepKind::Recovery, duration_s: Some(120.0), distance_m: None, pace: Some(450.0), hr_zone: None, note: String::new() },
+                    Step::Block {
+                        kind: StepKind::Work,
+                        duration_s: Some(180.0),
+                        distance_m: None,
+                        pace: Some(330.0),
+                        hr_zone: None,
+                        note: String::new(),
+                    },
+                    Step::Block {
+                        kind: StepKind::Recovery,
+                        duration_s: Some(120.0),
+                        distance_m: None,
+                        pace: Some(450.0),
+                        hr_zone: None,
+                        note: String::new(),
+                    },
                 ],
             },
-            Step::Block { kind: StepKind::Cooldown, duration_s: Some(600.0), distance_m: None, pace: None, hr_zone: None, note: String::new() },
+            Step::Block {
+                kind: StepKind::Cooldown,
+                duration_s: Some(600.0),
+                distance_m: None,
+                pace: None,
+                hr_zone: None,
+                note: String::new(),
+            },
         ];
         let (t, dist) = steps_totals(&steps);
         assert_eq!(t, 600.0 + 5.0 * 300.0 + 600.0);
@@ -917,7 +1000,11 @@ mod tests {
         assert_eq!(got.len(), 1);
         assert_eq!(got[0].run_type, Some(RunType::Intervals));
         assert_eq!(got[0].steps.len(), 1);
-        assert!(db.planned_workouts(d("2026-11-01"), d("2026-11-30")).unwrap().is_empty());
+        assert!(
+            db.planned_workouts(d("2026-11-01"), d("2026-11-30"))
+                .unwrap()
+                .is_empty()
+        );
         db.delete_plan(pid).unwrap();
         assert_eq!(db.planned_workout(wid).unwrap().unwrap().plan_id, None);
     }
@@ -925,11 +1012,19 @@ mod tests {
     #[test]
     fn goals_strength_and_tests_persist() {
         let mut db = Db::open_in_memory().unwrap();
-        let oid = db.save_objective(&Objective { title: "Correr 10 km".into(), ..Default::default() }).unwrap();
+        let oid = db
+            .save_objective(&Objective {
+                title: "Correr 10 km".into(),
+                ..Default::default()
+            })
+            .unwrap();
         let g = Goal {
             kind: GoalKind::MaxDistance,
             title: "5 km".into(),
-            params: GoalParams { distance_m: Some(5000.0), ..Default::default() },
+            params: GoalParams {
+                distance_m: Some(5000.0),
+                ..Default::default()
+            },
             objective_id: Some(oid),
             ..Default::default()
         };
@@ -948,14 +1043,25 @@ mod tests {
             ..Default::default()
         };
         let aid = db.save_manual_activity(&a).unwrap();
-        let sg = SetGroup { exercise_id: ex[0].id, sets: 3, reps: Some(10), weight_kg: Some(60.0), ..Default::default() };
+        let sg = SetGroup {
+            exercise_id: ex[0].id,
+            sets: 3,
+            reps: Some(10),
+            weight_kg: Some(60.0),
+            ..Default::default()
+        };
         assert_eq!(sg.volume(), 1800.0);
         db.save_set_groups(aid, &[sg]).unwrap();
         assert_eq!(db.exercise_history(ex[0].id).unwrap().len(), 1);
         assert_eq!(db.strength_volumes().unwrap()[&aid], 1800.0);
 
         let tid = db
-            .save_reference_test(&RefTest { name: "5 km 6:00".into(), modality: Modality::Treadmill, distance_m: 5000.0, ..Default::default() })
+            .save_reference_test(&RefTest {
+                name: "5 km 6:00".into(),
+                modality: Modality::Treadmill,
+                distance_m: 5000.0,
+                ..Default::default()
+            })
             .unwrap();
         db.set_reference_run(tid, aid, true).unwrap();
         assert_eq!(db.reference_runs(tid).unwrap(), vec![aid]);

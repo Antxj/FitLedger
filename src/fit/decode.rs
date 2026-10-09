@@ -66,10 +66,7 @@ impl fmt::Display for DecodeError {
         let s = match self {
             DecodeError::NotFit => tr!("não é um arquivo FIT", "not a FIT file"),
             DecodeError::Truncated => tr!("arquivo incompleto (truncado)", "incomplete (truncated) file"),
-            DecodeError::BadCrc => tr!(
-                "arquivo corrompido (CRC não confere)",
-                "corrupted file (CRC mismatch)"
-            ),
+            DecodeError::BadCrc => tr!("arquivo corrompido (CRC não confere)", "corrupted file (CRC mismatch)"),
             DecodeError::UndefinedLocalType(_) => tr!(
                 "arquivo corrompido (mensagem sem definição)",
                 "corrupted file (message without definition)"
@@ -139,7 +136,11 @@ pub fn decode(data: &[u8]) -> Result<Vec<Message>, DecodeError> {
 fn decode_one(data: &[u8], start: usize, out: &mut Vec<Message>) -> Result<usize, DecodeError> {
     let header = data.get(start..).ok_or(DecodeError::Truncated)?;
     if header.len() < 12 {
-        return Err(if start == 0 { DecodeError::NotFit } else { DecodeError::Truncated });
+        return Err(if start == 0 {
+            DecodeError::NotFit
+        } else {
+            DecodeError::Truncated
+        });
     }
     let header_size = header[0] as usize;
     if (header_size != 12 && header_size != 14) || &header[8..12] != b".FIT" {
@@ -158,7 +159,10 @@ fn decode_one(data: &[u8], start: usize, out: &mut Vec<Message>) -> Result<usize
         return Err(DecodeError::BadCrc);
     }
 
-    let mut r = Reader { data: &data[..records_end], pos: records_start };
+    let mut r = Reader {
+        data: &data[..records_end],
+        pos: records_start,
+    };
     let mut defs: [Option<Definition>; 16] = Default::default();
     let mut last_timestamp: u32 = 0;
 
@@ -173,7 +177,9 @@ fn decode_one(data: &[u8], start: usize, out: &mut Vec<Message>) -> Result<usize
                 ts += 0x20;
             }
             last_timestamp = ts;
-            let def = defs[local as usize].as_ref().ok_or(DecodeError::UndefinedLocalType(local))?;
+            let def = defs[local as usize]
+                .as_ref()
+                .ok_or(DecodeError::UndefinedLocalType(local))?;
             let mut msg = read_data(&mut r, def)?;
             if msg.get(TIMESTAMP).is_none() {
                 msg.fields.push((TIMESTAMP, Value::Int(ts as i64)));
@@ -196,7 +202,11 @@ fn decode_one(data: &[u8], start: usize, out: &mut Vec<Message>) -> Result<usize
             let mut fields = Vec::with_capacity(n as usize);
             for _ in 0..n {
                 let f = r.take(3)?;
-                fields.push(FieldDef { num: f[0], size: f[1], base: f[2] & 0x1F });
+                fields.push(FieldDef {
+                    num: f[0],
+                    size: f[1],
+                    base: f[2] & 0x1F,
+                });
             }
             let mut dev_size = 0usize;
             if has_dev {
@@ -205,9 +215,16 @@ fn decode_one(data: &[u8], start: usize, out: &mut Vec<Message>) -> Result<usize
                     dev_size += r.take(3)?[1] as usize;
                 }
             }
-            defs[local as usize] = Some(Definition { global, big_endian, fields, dev_size });
+            defs[local as usize] = Some(Definition {
+                global,
+                big_endian,
+                fields,
+                dev_size,
+            });
         } else {
-            let def = defs[local as usize].as_ref().ok_or(DecodeError::UndefinedLocalType(local))?;
+            let def = defs[local as usize]
+                .as_ref()
+                .ok_or(DecodeError::UndefinedLocalType(local))?;
             let msg = read_data(&mut r, def)?;
             if let Some(ts) = msg.get(TIMESTAMP).and_then(Value::as_i64) {
                 last_timestamp = ts as u32;
@@ -227,28 +244,31 @@ fn read_data(r: &mut Reader, def: &Definition) -> Result<Message, DecodeError> {
         }
     }
     r.take(def.dev_size)?;
-    Ok(Message { global: def.global, fields })
+    Ok(Message {
+        global: def.global,
+        fields,
+    })
 }
 
 /// (size in bytes, invalid marker) of each base type.
 fn base_info(base: u8) -> (usize, u64) {
     match base {
-        0x00 => (1, 0xFF),               // enum
-        0x01 => (1, 0x7F),               // sint8
-        0x02 => (1, 0xFF),               // uint8
-        0x03 => (2, 0x7FFF),             // sint16
-        0x04 => (2, 0xFFFF),             // uint16
-        0x05 => (4, 0x7FFF_FFFF),        // sint32
-        0x06 => (4, 0xFFFF_FFFF),        // uint32
-        0x08 => (4, 0xFFFF_FFFF),        // float32
-        0x09 => (8, u64::MAX),           // float64
-        0x0A => (1, 0x00),               // uint8z
-        0x0B => (2, 0x0000),             // uint16z
-        0x0C => (4, 0x0000_0000),        // uint32z
-        0x0D => (1, 0xFF),               // byte
+        0x00 => (1, 0xFF),                  // enum
+        0x01 => (1, 0x7F),                  // sint8
+        0x02 => (1, 0xFF),                  // uint8
+        0x03 => (2, 0x7FFF),                // sint16
+        0x04 => (2, 0xFFFF),                // uint16
+        0x05 => (4, 0x7FFF_FFFF),           // sint32
+        0x06 => (4, 0xFFFF_FFFF),           // uint32
+        0x08 => (4, 0xFFFF_FFFF),           // float32
+        0x09 => (8, u64::MAX),              // float64
+        0x0A => (1, 0x00),                  // uint8z
+        0x0B => (2, 0x0000),                // uint16z
+        0x0C => (4, 0x0000_0000),           // uint32z
+        0x0D => (1, 0xFF),                  // byte
         0x0E => (8, 0x7FFF_FFFF_FFFF_FFFF), // sint64
-        0x0F => (8, u64::MAX),           // uint64
-        0x10 => (8, 0),                  // uint64z
+        0x0F => (8, u64::MAX),              // uint64
+        0x10 => (8, 0),                     // uint64z
         _ => (1, 0xFF),
     }
 }
@@ -290,7 +310,11 @@ fn parse_value(raw: &[u8], base: u8, big_endian: bool) -> Option<Value> {
         if bits == invalid {
             return None;
         }
-        let v = if size == 4 { f32::from_bits(bits as u32) as f64 } else { f64::from_bits(bits) };
+        let v = if size == 4 {
+            f32::from_bits(bits as u32) as f64
+        } else {
+            f64::from_bits(bits)
+        };
         return v.is_finite().then_some(Value::Float(v));
     }
     let count = raw.len() / size;
@@ -310,8 +334,8 @@ fn parse_value(raw: &[u8], base: u8, big_endian: bool) -> Option<Value> {
 /// CRC-16 used by FIT (from the FIT SDK).
 pub fn crc16(data: &[u8]) -> u16 {
     const TABLE: [u16; 16] = [
-        0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401, 0xA001, 0x6C00, 0x7800,
-        0xB401, 0x5000, 0x9C01, 0x8801, 0x4400,
+        0x0000, 0xCC01, 0xD801, 0x1400, 0xF001, 0x3C00, 0x2800, 0xE401, 0xA001, 0x6C00, 0x7800, 0xB401, 0x5000, 0x9C01,
+        0x8801, 0x4400,
     ];
     let mut crc: u16 = 0;
     for &byte in data {
@@ -340,9 +364,25 @@ mod tests {
     fn roundtrip_with_writer() {
         let mut w = FitWriter::new();
         w.define(0, 20, &[(253, 4, 0x86), (3, 1, 0x02), (5, 4, 0x86), (0, 4, 0x85)]);
-        w.data(0, &[&1000u32.to_le_bytes(), &[150], &12345u32.to_le_bytes(), &(-5i32).to_le_bytes()]);
+        w.data(
+            0,
+            &[
+                &1000u32.to_le_bytes(),
+                &[150],
+                &12345u32.to_le_bytes(),
+                &(-5i32).to_le_bytes(),
+            ],
+        );
         // invalid heart rate (0xFF) is dropped
-        w.data(0, &[&1001u32.to_le_bytes(), &[0xFF], &12400u32.to_le_bytes(), &0x7FFF_FFFFi32.to_le_bytes()]);
+        w.data(
+            0,
+            &[
+                &1001u32.to_le_bytes(),
+                &[0xFF],
+                &12400u32.to_le_bytes(),
+                &0x7FFF_FFFFi32.to_le_bytes(),
+            ],
+        );
         let bytes = w.finish();
         let msgs = decode(&bytes).unwrap();
         assert_eq!(msgs.len(), 2);

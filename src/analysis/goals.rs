@@ -26,7 +26,10 @@ pub fn period_range(g: &Goal, today: NaiveDate) -> (NaiveDate, NaiveDate) {
         }
         GoalPeriod::Month => {
             let s = today.with_day(1).unwrap_or(today);
-            let e = s.checked_add_months(chrono::Months::new(1)).map(|d| d - Duration::days(1)).unwrap_or(today);
+            let e = s
+                .checked_add_months(chrono::Months::new(1))
+                .map(|d| d - Duration::days(1))
+                .unwrap_or(today);
             (s, e)
         }
         GoalPeriod::Range => (
@@ -37,7 +40,12 @@ pub fn period_range(g: &Goal, today: NaiveDate) -> (NaiveDate, NaiveDate) {
 }
 
 /// `best_efforts`: activity id → [(distance, time)].
-pub fn progress(g: &Goal, acts: &[Activity], best_efforts: &HashMap<i64, Vec<(f64, f64)>>, today: NaiveDate) -> Progress {
+pub fn progress(
+    g: &Goal,
+    acts: &[Activity],
+    best_efforts: &HashMap<i64, Vec<(f64, f64)>>,
+    today: NaiveDate,
+) -> Progress {
     let p = &g.params;
     // performance-type goals look at the whole goal range, not at the calendar period
     let range = match g.kind {
@@ -47,8 +55,11 @@ pub fn progress(g: &Goal, acts: &[Activity], best_efforts: &HashMap<i64, Vec<(f6
         ),
         _ => period_range(g, today),
     };
-    let in_range: Vec<&Activity> =
-        acts.iter().filter(|a| p.matches(a.modality)).filter(|a| (range.0..=range.1).contains(&day_of(a))).collect();
+    let in_range: Vec<&Activity> = acts
+        .iter()
+        .filter(|a| p.matches(a.modality))
+        .filter(|a| (range.0..=range.1).contains(&day_of(a)))
+        .collect();
     let frac = |cur: f64, target: f64| if target > 0.0 { (cur / target) as f32 } else { 0.0 };
     match g.kind {
         GoalKind::Distance => {
@@ -58,14 +69,21 @@ pub fn progress(g: &Goal, acts: &[Activity], best_efforts: &HashMap<i64, Vec<(f6
                 fraction: frac(cur, target),
                 done: target > 0.0 && cur >= target,
                 text: format!("{} / {} km", format::num(cur, 1), format::num_trim(target, 1)),
-                detail: trf!("{} atividade(s) no período", "{} activity(ies) in the period", in_range.len()),
+                detail: trf!(
+                    "{} atividade(s) no período",
+                    "{} activity(ies) in the period",
+                    in_range.len()
+                ),
             }
         }
         GoalKind::Frequency => {
             let target = p.count.unwrap_or(0.0);
             // this week's count; detail shows the average of the last 4 weeks
             let ws = week_start(today);
-            let cur = acts.iter().filter(|a| p.matches(a.modality) && (ws..=today).contains(&day_of(a))).count() as f64;
+            let cur = acts
+                .iter()
+                .filter(|a| p.matches(a.modality) && (ws..=today).contains(&day_of(a)))
+                .count() as f64;
             let last4 = acts
                 .iter()
                 .filter(|a| p.matches(a.modality))
@@ -75,7 +93,12 @@ pub fn progress(g: &Goal, acts: &[Activity], best_efforts: &HashMap<i64, Vec<(f6
             Progress {
                 fraction: frac(cur, target),
                 done: target > 0.0 && cur >= target,
-                text: trf!("{} / {} nesta semana", "{} / {} this week", cur, format::num_trim(target, 1)),
+                text: trf!(
+                    "{} / {} nesta semana",
+                    "{} / {} this week",
+                    cur,
+                    format::num_trim(target, 1)
+                ),
                 detail: trf!(
                     "média das 4 semanas anteriores: {} por semana",
                     "average of the previous 4 weeks: {} per week",
@@ -89,18 +112,33 @@ pub fn progress(g: &Goal, acts: &[Activity], best_efforts: &HashMap<i64, Vec<(f6
             Progress {
                 fraction: frac(cur, target),
                 done: target > 0.0 && cur >= target,
-                text: format!("{} / {}", format::hours_short(cur * 3600.0), format::hours_short(target * 3600.0)),
-                detail: trf!("{} sessão(ões) no período", "{} session(s) in the period", in_range.len()),
+                text: format!(
+                    "{} / {}",
+                    format::hours_short(cur * 3600.0),
+                    format::hours_short(target * 3600.0)
+                ),
+                detail: trf!(
+                    "{} sessão(ões) no período",
+                    "{} session(s) in the period",
+                    in_range.len()
+                ),
             }
         }
         GoalKind::MaxDistance => {
             let target = p.distance_m.unwrap_or(0.0);
-            let best = in_range.iter().filter_map(|a| a.distance().map(|d| (d, *a))).max_by(|x, y| x.0.total_cmp(&y.0));
+            let best = in_range
+                .iter()
+                .filter_map(|a| a.distance().map(|d| (d, *a)))
+                .max_by(|x, y| x.0.total_cmp(&y.0));
             let cur = best.map(|b| b.0).unwrap_or(0.0);
             Progress {
                 fraction: frac(cur, target),
                 done: target > 0.0 && cur >= target * 0.995,
-                text: format!("{} / {} km", format::num(cur / 1000.0, 2), format::num_trim(target / 1000.0, 2)),
+                text: format!(
+                    "{} / {} km",
+                    format::num(cur / 1000.0, 2),
+                    format::num_trim(target / 1000.0, 2)
+                ),
                 detail: best
                     .map(|(_, a)| trf!("maior: {}", "longest: {}", format::date(day_of(a))))
                     .unwrap_or_default(),
@@ -113,11 +151,15 @@ pub fn progress(g: &Goal, acts: &[Activity], best_efforts: &HashMap<i64, Vec<(f6
                 .iter()
                 .filter_map(|a| {
                     let list = best_efforts.get(&a.id)?;
-                    let t = list.iter().find(|(d, _)| (d - dist).abs() < 1.0).map(|(_, t)| *t).or_else(|| {
-                        // distance not in the records list: whole activity if close enough
-                        let ad = a.distance()?;
-                        ((ad - dist).abs() <= dist * 0.02).then(|| a.duration()).flatten()
-                    })?;
+                    let t = list
+                        .iter()
+                        .find(|(d, _)| (d - dist).abs() < 1.0)
+                        .map(|(_, t)| *t)
+                        .or_else(|| {
+                            // distance not in the records list: whole activity if close enough
+                            let ad = a.distance()?;
+                            ((ad - dist).abs() <= dist * 0.02).then(|| a.duration()).flatten()
+                        })?;
                     Some((t, *a))
                 })
                 .min_by(|x, y| x.0.total_cmp(&y.0));
@@ -125,14 +167,23 @@ pub fn progress(g: &Goal, acts: &[Activity], best_efforts: &HashMap<i64, Vec<(f6
                 Some((t, a)) => Progress {
                     fraction: if t > 0.0 { (target / t).min(1.0) as f32 } else { 0.0 },
                     done: t <= target,
-                    text: trf!("melhor: {} (meta {})", "best: {} (goal {})", format::duration(t), format::duration(target)),
+                    text: trf!(
+                        "melhor: {} (meta {})",
+                        "best: {} (goal {})",
+                        format::duration(t),
+                        format::duration(target)
+                    ),
                     detail: format::date(day_of(a)),
                 },
                 None => Progress {
                     fraction: 0.0,
                     done: false,
                     text: trf!("meta {}", "goal {}", format::duration(target)),
-                    detail: tr!("nenhuma corrida com essa distância ainda", "no run with this distance yet").into(),
+                    detail: tr!(
+                        "nenhuma corrida com essa distância ainda",
+                        "no run with this distance yet"
+                    )
+                    .into(),
                 },
             }
         }
@@ -150,7 +201,12 @@ pub fn progress(g: &Goal, acts: &[Activity], best_efforts: &HashMap<i64, Vec<(f6
                 Some((h, a)) => Progress {
                     fraction: if h > 0.0 { (target / h).min(1.0) as f32 } else { 0.0 },
                     done: h < target,
-                    text: trf!("melhor: {} (meta < {})", "best: {} (goal < {})", format::bpm(Some(h)), format::bpm(Some(target))),
+                    text: trf!(
+                        "melhor: {} (meta < {})",
+                        "best: {} (goal < {})",
+                        format::bpm(Some(h)),
+                        format::bpm(Some(target))
+                    ),
                     detail: trf!(
                         "{} · pace {}",
                         "{} · pace {}",
@@ -162,7 +218,11 @@ pub fn progress(g: &Goal, acts: &[Activity], best_efforts: &HashMap<i64, Vec<(f6
                     fraction: 0.0,
                     done: false,
                     text: trf!("meta < {}", "goal < {}", format::bpm(Some(target))),
-                    detail: tr!("nenhuma corrida nessas condições ainda", "no run in these conditions yet").into(),
+                    detail: tr!(
+                        "nenhuma corrida nessas condições ainda",
+                        "no run in these conditions yet"
+                    )
+                    .into(),
                 },
             }
         }
@@ -199,7 +259,11 @@ mod tests {
         ];
         let g = Goal {
             kind: GoalKind::Distance,
-            params: GoalParams { distance_m: Some(100_000.0), period: GoalPeriod::Month, ..Default::default() },
+            params: GoalParams {
+                distance_m: Some(100_000.0),
+                period: GoalPeriod::Month,
+                ..Default::default()
+            },
             ..Default::default()
         };
         let p = progress(&g, &acts, &HashMap::new(), today);
@@ -209,7 +273,11 @@ mod tests {
 
         let tennis = Goal {
             kind: GoalKind::Hours,
-            params: GoalParams { hours: Some(4.0), modality: Some("tennis".into()), ..Default::default() },
+            params: GoalParams {
+                hours: Some(4.0),
+                modality: Some("tennis".into()),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let p = progress(&tennis, &acts, &HashMap::new(), today);
@@ -223,10 +291,16 @@ mod tests {
             act(1, "2026-08-09", Modality::RoadRun, 5.03, 1776.0, 174.0),
             act(2, "2026-08-26", Modality::RoadRun, 5.01, 1729.0, 168.0),
         ];
-        let be: HashMap<i64, Vec<(f64, f64)>> = [(1, vec![(5000.0, 1765.0)]), (2, vec![(5000.0, 1725.0)])].into_iter().collect();
+        let be: HashMap<i64, Vec<(f64, f64)>> = [(1, vec![(5000.0, 1765.0)]), (2, vec![(5000.0, 1725.0)])]
+            .into_iter()
+            .collect();
         let g = Goal {
             kind: GoalKind::Performance,
-            params: GoalParams { distance_m: Some(5000.0), time_s: Some(28.0 * 60.0), ..Default::default() },
+            params: GoalParams {
+                distance_m: Some(5000.0),
+                time_s: Some(28.0 * 60.0),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let p = progress(&g, &acts, &be, today);
@@ -235,7 +309,12 @@ mod tests {
 
         let hr = Goal {
             kind: GoalKind::HeartRate,
-            params: GoalParams { distance_m: Some(5000.0), pace: Some(360.0), hr: Some(170.0), ..Default::default() },
+            params: GoalParams {
+                distance_m: Some(5000.0),
+                pace: Some(360.0),
+                hr: Some(170.0),
+                ..Default::default()
+            },
             ..Default::default()
         };
         let p = progress(&hr, &acts, &be, today);

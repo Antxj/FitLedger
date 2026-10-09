@@ -87,24 +87,6 @@ fn definir(e: Estado) {
     }
 }
 
-/// Number of the new version, while there is one to offer.
-pub fn disponivel() -> Option<String> {
-    match estado() {
-        Estado::Disponivel(v)
-        | Estado::Baixando(v, _)
-        | Estado::FalhaInstalacao(v, _)
-        | Estado::Reiniciando(v) => Some(v.numero),
-        _ => None,
-    }
-}
-
-/// Hides the result of the manual check (when leaving the screen).
-pub fn limpar_resultado() {
-    if matches!(estado(), Estado::EmDia | Estado::FalhaVerificacao(_)) {
-        definir(Estado::Nada);
-    }
-}
-
 pub fn pagina_repositorio() -> String {
     format!("https://github.com/{REPOSITORIO}")
 }
@@ -158,10 +140,11 @@ fn verificar(manual: bool) {
 fn consultar(url: &str, atual: &str) -> Result<Option<Versao>, String> {
     let corpo = http_get(url, LIMITE_JSON, &mut |_| {}).map_err(|e| match e {
         // private/non-existent repository or no published release
-        ErroHttp::Status(404) => {
-            tr!("Nenhuma versão publicada foi encontrada.", "No published version was found.")
-                .to_string()
-        }
+        ErroHttp::Status(404) => tr!(
+            "Nenhuma versão publicada foi encontrada.",
+            "No published version was found."
+        )
+        .to_string(),
         outro => outro.mensagem(),
     })?;
     interpretar(&corpo, atual)
@@ -179,16 +162,11 @@ fn interpretar(corpo: &[u8], atual: &str) -> Result<Option<Versao>, String> {
     if !versao_maior(&numero, atual) {
         return Ok(None);
     }
-    let pagina = v["html_url"]
-        .as_str()
-        .map(String::from)
-        .unwrap_or_else(pagina_releases);
+    let pagina = v["html_url"].as_str().map(String::from).unwrap_or_else(pagina_releases);
     let anexo = v["assets"].as_array().and_then(|lista| {
-        lista.iter().find(|a| {
-            a["name"]
-                .as_str()
-                .is_some_and(|n| n.eq_ignore_ascii_case(ARQUIVO))
-        })
+        lista
+            .iter()
+            .find(|a| a["name"].as_str().is_some_and(|n| n.eq_ignore_ascii_case(ARQUIVO)))
     });
     let mut versao = Versao {
         numero,
@@ -244,7 +222,10 @@ pub fn instalar(v: Versao) {
             Err(e) => {
                 definir(Estado::FalhaInstalacao(
                     v,
-                    trf!("Não encontrei o executável atual: {e}", "Could not find the current executable: {e}"),
+                    trf!(
+                        "Não encontrei o executável atual: {e}",
+                        "Could not find the current executable: {e}"
+                    ),
                 ));
                 return;
             }
@@ -288,11 +269,7 @@ fn vizinho(alvo: &Path, sufixo: &str) -> PathBuf {
     alvo.with_file_name(format!("{nome}.{sufixo}"))
 }
 
-fn baixar_e_trocar(
-    v: &Versao,
-    alvo: &Path,
-    progresso: &mut dyn FnMut(f32),
-) -> Result<(), String> {
+fn baixar_e_trocar(v: &Versao, alvo: &Path, progresso: &mut dyn FnMut(f32)) -> Result<(), String> {
     if v.download.is_empty() {
         return Err(trf!(
             "A versão {} não tem o {ARQUIVO} anexado.",
@@ -343,32 +320,34 @@ fn baixar_e_trocar(
 
     let novo = vizinho(alvo, "novo");
     let antigo = vizinho(alvo, "antigo");
-    std::fs::write(&novo, &dados)
-        .map_err(|e| {
-            trf!(
-                "Não consegui gravar a versão nova na pasta do aplicativo: {e}",
-                "Could not write the new version to the app folder: {e}"
-            )
-        })?;
+    std::fs::write(&novo, &dados).map_err(|e| {
+        trf!(
+            "Não consegui gravar a versão nova na pasta do aplicativo: {e}",
+            "Could not write the new version to the app folder: {e}"
+        )
+    })?;
 
     // from the first signed version on, only the same publisher is accepted
-    if let Some(editor) = assinante(alvo) {
-        if assinante(&novo).as_deref() != Some(editor.as_str()) {
-            let _ = std::fs::remove_file(&novo);
-            return Err(trf!(
-                "O arquivo baixado não tem a assinatura digital de \"{editor}\". \
+    if let Some(editor) = assinante(alvo)
+        && assinante(&novo).as_deref() != Some(editor.as_str())
+    {
+        let _ = std::fs::remove_file(&novo);
+        return Err(trf!(
+            "O arquivo baixado não tem a assinatura digital de \"{editor}\". \
                  Nada foi alterado.",
-                "The downloaded file is not digitally signed by \"{editor}\". \
+            "The downloaded file is not digitally signed by \"{editor}\". \
                  Nothing was changed."
-            ));
-        }
+        ));
     }
 
     // Windows allows renaming the running executable (not deleting it): the
     // current one becomes .antigo, deleted on the next start
     let _ = std::fs::remove_file(&antigo);
     let falha = |e: std::io::Error| {
-        trf!("Não consegui substituir o aplicativo: {e}", "Could not replace the app: {e}")
+        trf!(
+            "Não consegui substituir o aplicativo: {e}",
+            "Could not replace the app: {e}"
+        )
     };
     if let Err(e) = std::fs::rename(alvo, &antigo) {
         let _ = std::fs::remove_file(&novo);
@@ -433,9 +412,7 @@ use crate::hash::sha256_hex;
 
 /// Publisher name, if the file has a valid Authenticode signature.
 pub fn assinante(caminho: &Path) -> Option<String> {
-    use windows_sys::Win32::Security::Cryptography::{
-        CertGetNameStringW, CERT_NAME_SIMPLE_DISPLAY_TYPE,
-    };
+    use windows_sys::Win32::Security::Cryptography::{CERT_NAME_SIMPLE_DISPLAY_TYPE, CertGetNameStringW};
     use windows_sys::Win32::Security::WinTrust::*;
 
     let caminho_w = crate::single::wide(&caminho.to_string_lossy());
@@ -456,9 +433,7 @@ pub fn assinante(caminho: &Path) -> Option<String> {
 
     let mut acao = WINTRUST_ACTION_GENERIC_VERIFY_V2;
     let sem_janela = -1isize as *mut c_void; // INVALID_HANDLE_VALUE: never shows UI
-    let resultado = unsafe {
-        WinVerifyTrust(sem_janela, &mut acao, &mut dados as *mut _ as *mut c_void)
-    };
+    let resultado = unsafe { WinVerifyTrust(sem_janela, &mut acao, &mut dados as *mut _ as *mut c_void) };
 
     let mut nome = None;
     if resultado == 0 {
@@ -522,7 +497,10 @@ impl ErroHttp {
             )
             .into(),
             ErroHttp::Status(s) => {
-                trf!("O GitHub respondeu com erro (HTTP {s}).", "GitHub returned an error (HTTP {s}).")
+                trf!(
+                    "O GitHub respondeu com erro (HTTP {s}).",
+                    "GitHub returned an error (HTTP {s})."
+                )
             }
             ErroHttp::Grande => tr!("Resposta grande demais.", "Response too large.").into(),
             ErroHttp::Url => tr!("Endereço inválido.", "Invalid address.").into(),
@@ -643,14 +621,7 @@ fn http_get(url: &str, limite: usize, progresso: &mut dyn FnMut(u64)) -> Result<
     let mut buf = vec![0u8; 64 * 1024];
     loop {
         let mut lidos: u32 = 0;
-        let ok = unsafe {
-            WinHttpReadData(
-                pedido.0,
-                buf.as_mut_ptr() as *mut c_void,
-                buf.len() as u32,
-                &mut lidos,
-            )
-        };
+        let ok = unsafe { WinHttpReadData(pedido.0, buf.as_mut_ptr() as *mut c_void, buf.len() as u32, &mut lidos) };
         if ok == 0 {
             return Err(ErroHttp::Rede(ultimo_erro()));
         }
@@ -756,8 +727,7 @@ mod tests {
                         r.extend_from_slice(corpo);
                         r
                     }
-                    None => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
-                        .to_vec(),
+                    None => b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".to_vec(),
                 };
                 let _ = s.write_all(&resp);
             }

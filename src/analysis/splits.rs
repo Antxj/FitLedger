@@ -68,7 +68,9 @@ pub fn splits(st: &Stream, step_m: f64) -> Vec<Split> {
     let mut n = 1;
     loop {
         let target = (n as f64 * step_m).min(total);
-        let Some((t_end, i_end)) = time_at_distance(st, target, start_i) else { break };
+        let Some((t_end, i_end)) = time_at_distance(st, target, start_i) else {
+            break;
+        };
         let seg_d = target - start_d;
         // a last bit of a few meters (watch stopped just after the mark) is not a split
         if seg_d < 50.0 {
@@ -103,7 +105,11 @@ pub fn splits(st: &Stream, step_m: f64) -> Vec<Split> {
 /// Fastest time to cover `d` meters anywhere in the activity (elapsed time,
 /// interpolated). Returns (time, start seconds).
 pub fn best_effort(st: &Stream, d: f64) -> Option<(f64, f64)> {
-    let pts: Vec<(f64, f64)> = st.t.iter().zip(&st.dist).filter_map(|(t, d)| d.map(|d| (*t, d))).collect();
+    let pts: Vec<(f64, f64)> =
+        st.t.iter()
+            .zip(&st.dist)
+            .filter_map(|(t, d)| d.map(|d| (*t, d)))
+            .collect();
     if pts.len() < 2 || pts.last()?.1 - pts[0].1 < d {
         return None;
     }
@@ -123,7 +129,11 @@ pub fn best_effort(st: &Stream, d: f64) -> Option<(f64, f64)> {
         let (tj, dj) = pts[j];
         let (tp, dp) = pts[j - 1];
         let need = pts[i].1 + d;
-        let t_reach = if dj > dp { tp + (tj - tp) * (need - dp) / (dj - dp) } else { tj };
+        let t_reach = if dj > dp {
+            tp + (tj - tp) * (need - dp) / (dj - dp)
+        } else {
+            tj
+        };
         let time = t_reach - pts[i].0;
         if time > 0.0 && best.is_none_or(|(b, _)| time < b) {
             best = Some((time, pts[i].0));
@@ -206,7 +216,12 @@ mod tests {
             if i > 0 {
                 d += v;
             }
-            samples.push(Sample { t: i, speed: Some(v), distance: Some(d), ..Default::default() });
+            samples.push(Sample {
+                t: i,
+                speed: Some(v),
+                distance: Some(d),
+                ..Default::default()
+            });
         }
         let st = Stream::build(&samples, Modality::RoadRun, 1.0);
         let (t, start) = best_effort(&st, 1000.0).unwrap();

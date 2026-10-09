@@ -39,7 +39,12 @@ pub fn pace_bands<'a>(acts: impl Iterator<Item = &'a Activity>, metrics: &HashMa
         }
     }
     map.into_iter()
-        .map(|(k, (sum, n, ids))| PaceBand { pace: k as f64, avg_hr: sum / n as f64, minutes: n, activities: ids.len() })
+        .map(|(k, (sum, n, ids))| PaceBand {
+            pace: k as f64,
+            avg_hr: sum / n as f64,
+            minutes: n,
+            activities: ids.len(),
+        })
         .collect()
 }
 
@@ -56,7 +61,11 @@ pub struct HrAtPace {
 /// Heart rate at a given pace over time: per run, the average HR of the
 /// steady stretches within ±7.5 s/km of `pace`. Runs without steady
 /// stretches use their overall average when their average pace is close.
-pub fn hr_at_pace<'a>(acts: impl Iterator<Item = &'a Activity>, metrics: &HashMap<i64, Metrics>, pace: f64) -> Vec<HrAtPace> {
+pub fn hr_at_pace<'a>(
+    acts: impl Iterator<Item = &'a Activity>,
+    metrics: &HashMap<i64, Metrics>,
+    pace: f64,
+) -> Vec<HrAtPace> {
     let tol = PACE_BIN / 2.0;
     let mut out = Vec::new();
     for a in acts {
@@ -65,7 +74,13 @@ pub fn hr_at_pace<'a>(acts: impl Iterator<Item = &'a Activity>, metrics: &HashMa
         }
         let pts: Vec<f64> = metrics
             .get(&a.id)
-            .map(|m| m.pace_hr.iter().filter(|p| (p[0] - pace).abs() <= tol).map(|p| p[1]).collect())
+            .map(|m| {
+                m.pace_hr
+                    .iter()
+                    .filter(|p| (p[0] - pace).abs() <= tol)
+                    .map(|p| p[1])
+                    .collect()
+            })
             .unwrap_or_default();
         if pts.len() >= 3 {
             out.push(HrAtPace {
@@ -75,10 +90,16 @@ pub fn hr_at_pace<'a>(acts: impl Iterator<Item = &'a Activity>, metrics: &HashMa
                 minutes: pts.len(),
                 modality: a.modality,
             });
-        } else if let (Some(p), Some(h)) = (a.pace_s_per_km(), a.avg_hr) {
-            if (p - pace).abs() <= tol {
-                out.push(HrAtPace { activity_id: a.id, date: day_of(a), hr: h, minutes: 0, modality: a.modality });
-            }
+        } else if let (Some(p), Some(h)) = (a.pace_s_per_km(), a.avg_hr)
+            && (p - pace).abs() <= tol
+        {
+            out.push(HrAtPace {
+                activity_id: a.id,
+                date: day_of(a),
+                hr: h,
+                minutes: 0,
+                modality: a.modality,
+            });
         }
     }
     out.sort_by_key(|x| x.date);
@@ -87,7 +108,12 @@ pub fn hr_at_pace<'a>(acts: impl Iterator<Item = &'a Activity>, metrics: &HashMa
 
 /// Average pace of the steady stretches with HR inside [lo, hi].
 pub fn pace_in_hr_band(m: &Metrics, lo: f64, hi: f64) -> Option<(f64, usize)> {
-    let pts: Vec<f64> = m.pace_hr.iter().filter(|p| p[1] >= lo && p[1] <= hi).map(|p| p[0]).collect();
+    let pts: Vec<f64> = m
+        .pace_hr
+        .iter()
+        .filter(|p| p[1] >= lo && p[1] <= hi)
+        .map(|p| p[0])
+        .collect();
     (pts.len() >= 3).then(|| (pts.iter().sum::<f64>() / pts.len() as f64, pts.len()))
 }
 
@@ -109,14 +135,25 @@ pub fn comparability_notes(acts: &[&Activity], metrics: &HashMap<i64, Metrics>) 
             "Mixes treadmill and road: the treadmill has no wind or terrain changes, and its distance is estimated by the watch."
         ).to_string());
     }
-    let terrains: std::collections::HashSet<Terrain> =
-        acts.iter().map(|a| Terrain::of(a, metrics.get(&a.id))).filter(|t| !matches!(t, Terrain::Unknown | Terrain::Indoor)).collect();
+    let terrains: std::collections::HashSet<Terrain> = acts
+        .iter()
+        .map(|a| Terrain::of(a, metrics.get(&a.id)))
+        .filter(|t| !matches!(t, Terrain::Unknown | Terrain::Indoor))
+        .collect();
     if terrains.len() > 1 {
         let list: Vec<String> = acts
             .iter()
             .map(|a| {
-                let gain = a.ascent_m.or_else(|| metrics.get(&a.id).and_then(|m| m.gain_m)).unwrap_or(0.0);
-                format!("{} {} (+{} m)", crate::format::date_short(day_of(a)), Terrain::of(a, metrics.get(&a.id)).label(), gain.round())
+                let gain = a
+                    .ascent_m
+                    .or_else(|| metrics.get(&a.id).and_then(|m| m.gain_m))
+                    .unwrap_or(0.0);
+                format!(
+                    "{} {} (+{} m)",
+                    crate::format::date_short(day_of(a)),
+                    Terrain::of(a, metrics.get(&a.id)).label(),
+                    gain.round()
+                )
             })
             .collect();
         notes.push(trf!(
@@ -127,7 +164,10 @@ pub fn comparability_notes(acts: &[&Activity], metrics: &HashMap<i64, Metrics>) 
     }
     let dists: Vec<f64> = acts.iter().filter_map(|a| a.distance()).collect();
     if dists.len() >= 2 {
-        let (lo, hi) = (dists.iter().cloned().fold(f64::MAX, f64::min), dists.iter().cloned().fold(0.0, f64::max));
+        let (lo, hi) = (
+            dists.iter().cloned().fold(f64::MAX, f64::min),
+            dists.iter().cloned().fold(0.0, f64::max),
+        );
         if lo > 0.0 && hi / lo > 1.3 {
             notes.push(trf!(
                 "Distâncias bem diferentes ({} a {} km): o pace e a FC mudam com a duração do esforço.",
@@ -139,7 +179,10 @@ pub fn comparability_notes(acts: &[&Activity], metrics: &HashMap<i64, Metrics>) 
     }
     let temps: Vec<f64> = acts.iter().filter_map(|a| a.avg_temp).collect();
     if temps.len() >= 2 {
-        let (lo, hi) = (temps.iter().cloned().fold(f64::MAX, f64::min), temps.iter().cloned().fold(f64::MIN, f64::max));
+        let (lo, hi) = (
+            temps.iter().cloned().fold(f64::MAX, f64::min),
+            temps.iter().cloned().fold(f64::MIN, f64::max),
+        );
         if hi - lo >= 6.0 {
             notes.push(trf!(
                 "Temperaturas diferentes ({} a {} °C): calor eleva a FC.",
@@ -271,15 +314,33 @@ mod tests {
             avg_hr: Some(hr),
             ..Default::default()
         };
-        (a, Metrics { pace_hr: pts, ..Default::default() })
+        (
+            a,
+            Metrics {
+                pace_hr: pts,
+                ..Default::default()
+            },
+        )
     }
 
     #[test]
     fn bands_and_hr_at_pace() {
-        let (a1, m1) = run(1, 3, 362.0, 179.0, vec![[361.0, 178.0], [362.0, 179.0], [358.0, 180.0], [400.0, 165.0]]);
-        let (a2, m2) = run(2, 26, 345.0, 168.0, vec![[359.0, 168.0], [360.0, 167.0], [364.0, 169.0]]);
+        let (a1, m1) = run(
+            1,
+            3,
+            362.0,
+            179.0,
+            vec![[361.0, 178.0], [362.0, 179.0], [358.0, 180.0], [400.0, 165.0]],
+        );
+        let (a2, m2) = run(
+            2,
+            26,
+            345.0,
+            168.0,
+            vec![[359.0, 168.0], [360.0, 167.0], [364.0, 169.0]],
+        );
         let (a3, m3) = run(3, 10, 361.0, 172.0, vec![]); // no steady stretches: uses the average
-        let acts = vec![a1, a2, a3];
+        let acts = [a1, a2, a3];
         let metrics: HashMap<i64, Metrics> = [(1, m1), (2, m2), (3, m3)].into_iter().collect();
         let bands = pace_bands(acts.iter(), &metrics);
         let b6 = bands.iter().find(|b| b.pace == 360.0).unwrap();

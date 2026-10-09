@@ -8,6 +8,7 @@ mod i18n;
 mod analysis;
 mod backup;
 mod db;
+mod demo;
 mod export;
 mod fit;
 mod format;
@@ -28,10 +29,10 @@ use std::time::Duration;
 fn main() {
     // started by the updater: wait for the old version to close first
     let args: Vec<String> = std::env::args().collect();
-    if let Some(i) = args.iter().position(|a| a == update::ARG_APOS_ATUALIZAR) {
-        if let Some(pid) = args.get(i + 1).and_then(|p| p.parse().ok()) {
-            update::aguardar_processo(pid, Duration::from_secs(20));
-        }
+    if let Some(i) = args.iter().position(|a| a == update::ARG_APOS_ATUALIZAR)
+        && let Some(pid) = args.get(i + 1).and_then(|p| p.parse().ok())
+    {
+        update::aguardar_processo(pid, Duration::from_secs(20));
     }
     update::limpar_restos();
 
@@ -102,7 +103,11 @@ fn icon() -> egui::IconData {
             }
         }
     }
-    egui::IconData { rgba, width: size, height: size }
+    egui::IconData {
+        rgba,
+        width: size,
+        height: size,
+    }
 }
 
 /// Error before the window exists: a Windows message box.

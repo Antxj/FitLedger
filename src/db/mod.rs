@@ -7,7 +7,7 @@
 pub mod schema;
 
 use crate::fit::activity::ParsedActivity;
-use crate::model::{Activity, Lap, Modality, Sample, TimerEvent};
+use crate::model::{Activity, Lap, Modality, Sample};
 use crate::settings::Settings;
 use rusqlite::{Connection, OptionalExtension, Row, params};
 use std::path::Path;
@@ -67,12 +67,13 @@ impl Db {
                 )),
             ));
         }
-        if current > 0 && current < latest {
-            if let Some(dir) = backup_dir {
-                let _ = std::fs::create_dir_all(dir);
-                let file = dir.join(format!("before-migration-v{current}-{}.db", now()));
-                self.conn.execute("VACUUM INTO ?1", [file.to_string_lossy()])?;
-            }
+        if current > 0
+            && current < latest
+            && let Some(dir) = backup_dir
+        {
+            let _ = std::fs::create_dir_all(dir);
+            let file = dir.join(format!("before-migration-v{current}-{}.db", now()));
+            self.conn.execute("VACUUM INTO ?1", [file.to_string_lossy()])?;
         }
         for (i, sql) in schema::MIGRATIONS.iter().enumerate().skip(current as usize) {
             let tx = self.conn.unchecked_transaction()?;
@@ -87,7 +88,9 @@ impl Db {
 
     pub fn load_settings(&self) -> Settings {
         self.conn
-            .query_row("SELECT value FROM settings WHERE key = 'settings'", [], |r| r.get::<_, String>(0))
+            .query_row("SELECT value FROM settings WHERE key = 'settings'", [], |r| {
+                r.get::<_, String>(0)
+            })
             .optional()
             .ok()
             .flatten()
@@ -240,7 +243,9 @@ impl Db {
                  VALUES(?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11)",
             )?;
             for s in &a.samples {
-                st.execute(params![id, s.t, s.lat, s.lon, s.alt, s.hr, s.cadence, s.distance, s.speed, s.power, s.temp])?;
+                st.execute(params![
+                    id, s.t, s.lat, s.lon, s.alt, s.hr, s.cadence, s.distance, s.speed, s.power, s.temp
+                ])?;
             }
             let mut st = tx.prepare(
                 "INSERT INTO lap(activity_id, idx, start_time, elapsed_s, timer_s, distance_m, calories,
@@ -249,13 +254,25 @@ impl Db {
             )?;
             for (i, l) in a.laps.iter().enumerate() {
                 st.execute(params![
-                    id, i as i64, l.start, l.elapsed_s, l.timer_s, l.distance_m, l.calories, l.avg_speed,
-                    l.max_speed, l.avg_hr, l.max_hr, l.avg_cadence, l.ascent_m, l.descent_m, l.trigger
+                    id,
+                    i as i64,
+                    l.start,
+                    l.elapsed_s,
+                    l.timer_s,
+                    l.distance_m,
+                    l.calories,
+                    l.avg_speed,
+                    l.max_speed,
+                    l.avg_hr,
+                    l.max_hr,
+                    l.avg_cadence,
+                    l.ascent_m,
+                    l.descent_m,
+                    l.trigger
                 ])?;
             }
-            let mut st = tx.prepare(
-                "INSERT INTO timer_event(activity_id, t, event, event_type) VALUES(?1,?2,?3,?4)",
-            )?;
+            let mut st =
+                tx.prepare("INSERT INTO timer_event(activity_id, t, event, event_type) VALUES(?1,?2,?3,?4)")?;
             for e in &a.events {
                 st.execute(params![id, e.t, e.event, e.event_type])?;
             }
@@ -264,7 +281,15 @@ impl Db {
                  VALUES(?1,?2,?3,?4,?5,?6,?7)",
             )?;
             for (i, s) in a.sets.iter().enumerate() {
-                st.execute(params![id, i as i64, s.t, s.duration_s, s.reps, s.weight_kg, s.category])?;
+                st.execute(params![
+                    id,
+                    i as i64,
+                    s.t,
+                    s.duration_s,
+                    s.reps,
+                    s.weight_kg,
+                    s.category
+                ])?;
             }
         }
         tx.commit()?;
@@ -282,7 +307,9 @@ impl Db {
     // ---------------------------------------------------------- activities --
 
     pub fn activities(&self) -> Result<Vec<Activity>> {
-        let mut st = self.conn.prepare(&format!("{ACTIVITY_SELECT} ORDER BY a.start_time DESC"))?;
+        let mut st = self
+            .conn
+            .prepare(&format!("{ACTIVITY_SELECT} ORDER BY a.start_time DESC"))?;
         let rows = st.query_map([], activity_from_row)?;
         rows.collect()
     }
@@ -341,12 +368,18 @@ impl Db {
         rows.collect()
     }
 
-    pub fn timer_events(&self, activity_id: i64) -> Result<Vec<TimerEvent>> {
+    pub fn fit_sets(&self, activity_id: i64) -> Result<Vec<crate::model::StrengthSet>> {
         let mut st = self.conn.prepare_cached(
-            "SELECT t, event, event_type FROM timer_event WHERE activity_id = ?1 ORDER BY t",
+            "SELECT t, duration_s, reps, weight_kg, category FROM fit_set WHERE activity_id = ?1 ORDER BY idx",
         )?;
         let rows = st.query_map([activity_id], |r| {
-            Ok(TimerEvent { t: r.get(0)?, event: r.get(1)?, event_type: r.get(2)? })
+            Ok(crate::model::StrengthSet {
+                t: r.get(0)?,
+                duration_s: r.get(1)?,
+                reps: r.get(2)?,
+                weight_kg: r.get(3)?,
+                category: r.get(4)?,
+            })
         })?;
         rows.collect()
     }
@@ -386,9 +419,23 @@ impl Db {
                     soreness, body_weight, created_at, updated_at)
                  VALUES('manual',?1,?2,?3,?4,?5,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?17)",
                 params![
-                    a.start_time, a.tz_offset, a.modality.code(), a.name, a.elapsed_s, a.distance_m,
-                    a.calories, a.avg_hr, a.max_hr, a.incline_pct, a.notes, a.rpe, a.sleep_quality,
-                    a.fatigue, a.soreness, a.body_weight, ts
+                    a.start_time,
+                    a.tz_offset,
+                    a.modality.code(),
+                    a.name,
+                    a.elapsed_s,
+                    a.distance_m,
+                    a.calories,
+                    a.avg_hr,
+                    a.max_hr,
+                    a.incline_pct,
+                    a.notes,
+                    a.rpe,
+                    a.sleep_quality,
+                    a.fatigue,
+                    a.soreness,
+                    a.body_weight,
+                    ts
                 ],
             )?;
             Ok(self.conn.last_insert_rowid())
@@ -400,9 +447,24 @@ impl Db {
                     soreness = ?16, body_weight = ?17, updated_at = ?18
                  WHERE id = ?1 AND source = 'manual'",
                 params![
-                    a.id, a.start_time, a.tz_offset, a.modality.code(), a.name, a.elapsed_s, a.distance_m,
-                    a.calories, a.avg_hr, a.max_hr, a.incline_pct, a.notes, a.rpe, a.sleep_quality,
-                    a.fatigue, a.soreness, a.body_weight, ts
+                    a.id,
+                    a.start_time,
+                    a.tz_offset,
+                    a.modality.code(),
+                    a.name,
+                    a.elapsed_s,
+                    a.distance_m,
+                    a.calories,
+                    a.avg_hr,
+                    a.max_hr,
+                    a.incline_pct,
+                    a.notes,
+                    a.rpe,
+                    a.sleep_quality,
+                    a.fatigue,
+                    a.soreness,
+                    a.body_weight,
+                    ts
                 ],
             )?;
             Ok(a.id)
@@ -418,7 +480,10 @@ impl Db {
             .query_row("SELECT fit_file_id FROM activity WHERE id = ?1", [id], |r| r.get(0))
             .optional()?
             .flatten();
-        tx.execute("UPDATE planned_workout SET activity_id = NULL WHERE activity_id = ?1", [id])?;
+        tx.execute(
+            "UPDATE planned_workout SET activity_id = NULL WHERE activity_id = ?1",
+            [id],
+        )?;
         tx.execute("DELETE FROM activity WHERE id = ?1", [id])?;
         if let Some(f) = file {
             tx.execute("DELETE FROM fit_file WHERE id = ?1", [f])?;
@@ -426,16 +491,14 @@ impl Db {
         tx.commit()
     }
 
-    pub fn activity_ids(&self) -> Result<Vec<i64>> {
-        let mut st = self.conn.prepare("SELECT id FROM activity ORDER BY start_time")?;
-        let rows = st.query_map([], |r| r.get(0))?;
-        rows.collect()
-    }
-
     /// Highest heart rate in all activities (to estimate the max HR).
     pub fn observed_max_hr(&self) -> Option<f64> {
         self.conn
-            .query_row("SELECT max(max_hr) FROM activity WHERE max_hr BETWEEN 100 AND 230", [], |r| r.get(0))
+            .query_row(
+                "SELECT max(max_hr) FROM activity WHERE max_hr BETWEEN 100 AND 230",
+                [],
+                |r| r.get(0),
+            )
             .ok()
             .flatten()
     }
@@ -524,7 +587,12 @@ mod tests {
     fn settings_roundtrip() {
         let db = Db::open_in_memory().unwrap();
         assert_eq!(db.load_settings(), Settings::default());
-        let s = Settings { age: Some(38), hr_max: Some(195.0), onboarded: true, ..Default::default() };
+        let s = Settings {
+            age: Some(38),
+            hr_max: Some(195.0),
+            onboarded: true,
+            ..Default::default()
+        };
         db.save_settings(&s).unwrap();
         assert_eq!(db.load_settings(), s);
     }
@@ -537,7 +605,11 @@ mod tests {
         let path = dir.join("t.db");
         {
             let db = Db::open(&path, Some(&dir)).unwrap();
-            db.save_settings(&Settings { age: Some(30), ..Default::default() }).unwrap();
+            db.save_settings(&Settings {
+                age: Some(30),
+                ..Default::default()
+            })
+            .unwrap();
         }
         let db = Db::open(&path, Some(&dir)).unwrap();
         assert_eq!(db.load_settings().age, Some(30));

@@ -70,10 +70,14 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     });
     let ctx = ui.ctx().clone();
     let text = app.pages.settings.restore_info.clone();
-    if widgets::confirm_window(&ctx, &mut app.pages.settings.confirm_restore, tr!("Restaurar backup", "Restore backup"), &text) {
-        if let Some(src) = app.pages.settings.restore_src.take() {
-            restore(app, &src);
-        }
+    if widgets::confirm_window(
+        &ctx,
+        &mut app.pages.settings.confirm_restore,
+        tr!("Restaurar backup", "Restore backup"),
+        &text,
+    ) && let Some(src) = app.pages.settings.restore_src.take()
+    {
+        restore(app, &src);
     }
 }
 
@@ -81,21 +85,26 @@ fn profile(app: &mut App, ui: &mut Ui) {
     widgets::section(ui, tr!("Dados pessoais (opcionais)", "Personal data (optional)"));
     let s = &mut app.pages.settings;
     let mut changed = false;
-    egui::Grid::new("profile").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-        let mut field = |ui: &mut Ui, label: &str, buf: &mut String, unit: &str| {
-            ui.label(label);
-            ui.horizontal(|ui| {
-                changed |= ui.add(egui::TextEdit::singleline(buf).desired_width(80.0)).changed();
-                ui.label(unit);
-            });
-            ui.end_row();
-        };
-        field(ui, tr!("Idade", "Age"), &mut s.age, tr!("anos", "years"));
-        field(ui, tr!("Peso", "Weight"), &mut s.weight, "kg");
-        field(ui, tr!("Altura", "Height"), &mut s.height, "cm");
-    });
+    egui::Grid::new("profile")
+        .num_columns(2)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            let mut field = |ui: &mut Ui, label: &str, buf: &mut String, unit: &str| {
+                ui.label(label);
+                ui.horizontal(|ui| {
+                    changed |= ui.add(egui::TextEdit::singleline(buf).desired_width(80.0)).changed();
+                    ui.label(unit);
+                });
+                ui.end_row();
+            };
+            field(ui, tr!("Idade", "Age"), &mut s.age, tr!("anos", "years"));
+            field(ui, tr!("Peso", "Weight"), &mut s.weight, "kg");
+            field(ui, tr!("Altura", "Height"), &mut s.height, "cm");
+        });
     if changed {
-        app.settings.age = format::parse_num(&s.age).filter(|v| (5.0..120.0).contains(v)).map(|v| v as u32);
+        app.settings.age = format::parse_num(&s.age)
+            .filter(|v| (5.0..120.0).contains(v))
+            .map(|v| v as u32);
         app.settings.weight_kg = format::parse_num(&s.weight).filter(|v| *v > 20.0);
         app.settings.height_cm = format::parse_num(&s.height).filter(|v| *v > 80.0);
         app.save_settings();
@@ -107,44 +116,70 @@ fn heart_rate(app: &mut App, ui: &mut Ui) {
     let observed = app.db.observed_max_hr();
     let s = &mut app.pages.settings;
     let mut changed = false;
-    egui::Grid::new("hr").num_columns(2).spacing([12.0, 6.0]).show(ui, |ui| {
-        ui.label(tr!("FC máxima", "Max HR"));
-        ui.horizontal(|ui| {
-            changed |= ui.add(egui::TextEdit::singleline(&mut s.hr_max).desired_width(80.0)).changed();
-            ui.label("bpm");
-            ui.label(weak(ui, trf!(
-                "em branco: usa a maior registrada ({}) ou 220 − idade",
-                "blank: uses the highest recorded ({}) or 220 − age",
-                format::bpm(observed)
-            )));
-        });
-        ui.end_row();
-        ui.label(tr!("FC de repouso", "Resting HR"));
-        ui.horizontal(|ui| {
-            changed |= ui.add(egui::TextEdit::singleline(&mut s.hr_rest).desired_width(80.0)).changed();
-            ui.label("bpm");
-            ui.label(weak(ui, tr!("usada na carga (TRIMP) e nas zonas por reserva", "used for load (TRIMP) and reserve zones")));
-        });
-        ui.end_row();
-        ui.label(tr!("Método das zonas", "Zone method"));
-        ui.horizontal(|ui| {
-            let m = &mut app.settings.zone_method;
-            changed |= ui.selectable_value(m, ZoneMethod::MaxHr, tr!("% da FC máxima", "% of max HR")).changed();
-            changed |= ui.selectable_value(m, ZoneMethod::Reserve, tr!("% da reserva (Karvonen)", "% of reserve (Karvonen)")).changed();
-            changed |= ui.selectable_value(m, ZoneMethod::Custom, tr!("Personalizadas", "Custom")).changed();
-        });
-        ui.end_row();
-        if app.settings.zone_method == ZoneMethod::Custom {
-            ui.label(tr!("Início de cada zona (bpm)", "Start of each zone (bpm)"));
+    egui::Grid::new("hr")
+        .num_columns(2)
+        .spacing([12.0, 6.0])
+        .show(ui, |ui| {
+            ui.label(tr!("FC máxima", "Max HR"));
             ui.horizontal(|ui| {
-                for (i, z) in s.zones.iter_mut().enumerate() {
-                    ui.label(format!("Z{}", i + 1));
-                    changed |= ui.add(egui::TextEdit::singleline(z).desired_width(44.0)).changed();
-                }
+                changed |= ui
+                    .add(egui::TextEdit::singleline(&mut s.hr_max).desired_width(80.0))
+                    .changed();
+                ui.label("bpm");
+                ui.label(weak(
+                    ui,
+                    trf!(
+                        "em branco: usa a maior registrada ({}) ou 220 − idade",
+                        "blank: uses the highest recorded ({}) or 220 − age",
+                        format::bpm(observed)
+                    ),
+                ));
             });
             ui.end_row();
-        }
-    });
+            ui.label(tr!("FC de repouso", "Resting HR"));
+            ui.horizontal(|ui| {
+                changed |= ui
+                    .add(egui::TextEdit::singleline(&mut s.hr_rest).desired_width(80.0))
+                    .changed();
+                ui.label("bpm");
+                ui.label(weak(
+                    ui,
+                    tr!(
+                        "usada na carga (TRIMP) e nas zonas por reserva",
+                        "used for load (TRIMP) and reserve zones"
+                    ),
+                ));
+            });
+            ui.end_row();
+            ui.label(tr!("Método das zonas", "Zone method"));
+            ui.horizontal(|ui| {
+                let m = &mut app.settings.zone_method;
+                changed |= ui
+                    .selectable_value(m, ZoneMethod::MaxHr, tr!("% da FC máxima", "% of max HR"))
+                    .changed();
+                changed |= ui
+                    .selectable_value(
+                        m,
+                        ZoneMethod::Reserve,
+                        tr!("% da reserva (Karvonen)", "% of reserve (Karvonen)"),
+                    )
+                    .changed();
+                changed |= ui
+                    .selectable_value(m, ZoneMethod::Custom, tr!("Personalizadas", "Custom"))
+                    .changed();
+            });
+            ui.end_row();
+            if app.settings.zone_method == ZoneMethod::Custom {
+                ui.label(tr!("Início de cada zona (bpm)", "Start of each zone (bpm)"));
+                ui.horizontal(|ui| {
+                    for (i, z) in s.zones.iter_mut().enumerate() {
+                        ui.label(format!("Z{}", i + 1));
+                        changed |= ui.add(egui::TextEdit::singleline(z).desired_width(44.0)).changed();
+                    }
+                });
+                ui.end_row();
+            }
+        });
     if changed {
         app.settings.hr_max = format::parse_num(&s.hr_max).filter(|v| (120.0..240.0).contains(v));
         app.settings.hr_rest = format::parse_num(&s.hr_rest).filter(|v| (25.0..120.0).contains(v));
@@ -160,7 +195,11 @@ fn heart_rate(app: &mut App, ui: &mut Ui) {
     ui.horizontal_wrapped(|ui| {
         for z in 1..=5 {
             let (lo, hi) = zones.range(z);
-            widgets::chip(ui, &format!("Z{z}: {}–{} bpm", lo.round(), hi.round()), widgets::ZONES[z]);
+            widgets::chip(
+                ui,
+                &format!("Z{z}: {}–{} bpm", lo.round(), hi.round()),
+                widgets::ZONES[z],
+            );
         }
     });
     ui.label(weak(ui, tr!(
@@ -170,11 +209,18 @@ fn heart_rate(app: &mut App, ui: &mut Ui) {
 }
 
 fn appearance(app: &mut App, ui: &mut Ui) {
-    widgets::section(ui, tr!("Aparência, idioma e unidades", "Appearance, language and units"));
+    widgets::section(
+        ui,
+        tr!("Aparência, idioma e unidades", "Appearance, language and units"),
+    );
     ui.horizontal(|ui| {
         ui.label(tr!("Tema:", "Theme:"));
-        let mut changed = ui.selectable_value(&mut app.settings.theme, Theme::Dark, tr!("Escuro", "Dark")).changed();
-        changed |= ui.selectable_value(&mut app.settings.theme, Theme::Light, tr!("Claro", "Light")).changed();
+        let mut changed = ui
+            .selectable_value(&mut app.settings.theme, Theme::Dark, tr!("Escuro", "Dark"))
+            .changed();
+        changed |= ui
+            .selectable_value(&mut app.settings.theme, Theme::Light, tr!("Claro", "Light"))
+            .changed();
         if changed {
             app.save_settings();
         }
@@ -182,38 +228,69 @@ fn appearance(app: &mut App, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.label(tr!("Idioma:", "Language:"));
         let current = app.settings.language.clone();
-        if ui.selectable_label(current.is_none(), tr!("Automático (Windows)", "Automatic (Windows)")).clicked() {
+        if ui
+            .selectable_label(current.is_none(), tr!("Automático (Windows)", "Automatic (Windows)"))
+            .clicked()
+        {
             app.settings.language = None;
             crate::i18n::aplicar(None);
             app.save_settings();
         }
         for i in [Idioma::Portugues, Idioma::Ingles] {
-            if ui.selectable_label(current.as_deref() == Some(i.codigo()), i.nome()).clicked() {
+            if ui
+                .selectable_label(current.as_deref() == Some(i.codigo()), i.nome())
+                .clicked()
+            {
                 app.settings.language = Some(i.codigo().into());
                 crate::i18n::aplicar(Some(i));
                 app.save_settings();
             }
         }
     });
-    ui.label(weak(ui, tr!(
-        "Unidades: distância em km, pace em min/km, velocidade em km/h, peso em kg e temperatura em °C.",
-        "Units: distance in km, pace in min/km, speed in km/h, weight in kg and temperature in °C."
-    )));
+    ui.label(weak(
+        ui,
+        tr!(
+            "Unidades: distância em km, pace em min/km, velocidade em km/h, peso em kg e temperatura em °C.",
+            "Units: distance in km, pace in min/km, speed in km/h, weight in kg and temperature in °C."
+        ),
+    ));
 }
 
 fn data(app: &mut App, ui: &mut Ui) {
     widgets::section(ui, tr!("Dados", "Data"));
-    ui.label(weak(ui, trf!("Arquivos FIT: {}", "FIT files: {}", app.paths.fits.display())));
-    ui.label(weak(ui, trf!("Banco de dados: {}", "Database: {}", app.paths.db.display())));
+    ui.label(weak(
+        ui,
+        trf!("Pasta do aplicativo: {}", "App folder: {}", app.paths.base.display()),
+    ));
+    ui.label(weak(
+        ui,
+        trf!("Arquivos FIT: {}", "FIT files: {}", app.paths.fits.display()),
+    ));
+    ui.label(weak(
+        ui,
+        trf!("Banco de dados: {}", "Database: {}", app.paths.db.display()),
+    ));
     ui.horizontal_wrapped(|ui| {
         if ui.button(tr!("📁 Abrir pasta /fits", "📁 Open /fits folder")).clicked() {
             let _ = std::process::Command::new("explorer").arg(&app.paths.fits).spawn();
         }
-        if ui.button(tr!("📁 Abrir pasta de dados", "📁 Open data folder")).clicked() {
+        if ui
+            .button(tr!("📁 Abrir pasta de dados", "📁 Open data folder"))
+            .clicked()
+        {
             let _ = std::process::Command::new("explorer").arg(&app.paths.data).spawn();
         }
         let mut auto = app.settings.auto_import;
-        if ui.checkbox(&mut auto, tr!("Importar novos arquivos de /fits ao abrir", "Import new files from /fits on start")).changed() {
+        if ui
+            .checkbox(
+                &mut auto,
+                tr!(
+                    "Importar novos arquivos de /fits ao abrir",
+                    "Import new files from /fits on start"
+                ),
+            )
+            .changed()
+        {
             app.settings.auto_import = auto;
             app.save_settings();
         }
@@ -221,11 +298,14 @@ fn data(app: &mut App, ui: &mut Ui) {
     let failed = crate::import::KnownErrors::load(&app.db);
     if !failed.0.is_empty() {
         ui.horizontal(|ui| {
-            ui.label(RichText::new(trf!(
-                "{} arquivo(s) em /fits falharam e não são tentados de novo automaticamente.",
-                "{} file(s) in /fits failed and are not retried automatically.",
-                failed.0.len()
-            )).color(widgets::WARN));
+            ui.label(
+                RichText::new(trf!(
+                    "{} arquivo(s) em /fits falharam e não são tentados de novo automaticamente.",
+                    "{} file(s) in /fits failed and are not retried automatically.",
+                    failed.0.len()
+                ))
+                .color(widgets::WARN),
+            );
             if ui.button(tr!("Tentar de novo", "Try again")).clicked() {
                 crate::import::KnownErrors::default().save(&app.db);
                 app.import_from_folder(false);
@@ -247,8 +327,8 @@ fn data(app: &mut App, ui: &mut Ui) {
         {
             app.start_job(JobKind::Recalculate);
         }
-        if ui.button(tr!("💾 Criar backup", "💾 Create backup")).clicked() {
-            if let Some(dest) = rfd::FileDialog::new()
+        if ui.button(tr!("💾 Criar backup", "💾 Create backup")).clicked()
+            && let Some(dest) = rfd::FileDialog::new()
                 .set_title(tr!("Criar backup", "Create backup"))
                 .set_file_name(backup::default_file_name())
                 .add_filter("FitLedger", &[backup::EXTENSION])
@@ -259,9 +339,8 @@ fn data(app: &mut App, ui: &mut Ui) {
                     Err(e) => app.toast_error(trf!("Falha no backup: {e}", "Backup failed: {e}")),
                 }
             }
-        }
-        if ui.add_enabled(!busy, egui::Button::new(tr!("♻ Restaurar backup", "♻ Restore backup"))).clicked() {
-            if let Some(src) = rfd::FileDialog::new()
+        if ui.add_enabled(!busy, egui::Button::new(tr!("♻ Restaurar backup", "♻ Restore backup"))).clicked()
+            && let Some(src) = rfd::FileDialog::new()
                 .set_title(tr!("Restaurar backup", "Restore backup"))
                 .add_filter("FitLedger", &[backup::EXTENSION, "db"])
                 .pick_file()
@@ -282,31 +361,39 @@ fn data(app: &mut App, ui: &mut Ui) {
                     Err(e) => app.toast_error(trf!("Não é possível restaurar: {e}", "Cannot restore: {e}")),
                 }
             }
-        }
     });
     ui.add_space(6.0);
     ui.horizontal_wrapped(|ui| {
         ui.label(tr!("Exportar:", "Export:"));
         let s = &mut app.pages.settings;
-        egui::ComboBox::from_id_salt("export").selected_text(s.export_what.label()).show_ui(ui, |ui| {
-            for w in What::ALL {
-                ui.selectable_value(&mut s.export_what, w, w.label());
-            }
-        });
+        egui::ComboBox::from_id_salt("export")
+            .selected_text(s.export_what.label())
+            .show_ui(ui, |ui| {
+                for w in What::ALL {
+                    ui.selectable_value(&mut s.export_what, w, w.label());
+                }
+            });
         let what = s.export_what;
         for (label, ext) in [("CSV", "csv"), ("JSON", "json")] {
-            if ui.button(format!("⬇ {label}")).clicked() {
-                if let Some(dest) = rfd::FileDialog::new()
-                    .set_file_name(format!("{}-{}.{ext}", what.file_stem(), chrono::Local::now().format("%Y-%m-%d")))
+            if ui.button(format!("⬇ {label}")).clicked()
+                && let Some(dest) = rfd::FileDialog::new()
+                    .set_file_name(format!(
+                        "{}-{}.{ext}",
+                        what.file_stem(),
+                        chrono::Local::now().format("%Y-%m-%d")
+                    ))
                     .add_filter(label, &[ext])
                     .save_file()
-                {
-                    let table = export::build(&app.db, what, &app.data.activities, &app.data.metrics);
-                    let text = if ext == "csv" { export::to_csv(&table) } else { export::to_json(&table) };
-                    match std::fs::write(&dest, text) {
-                        Ok(()) => app.toast(trf!("{} linhas exportadas.", "{} rows exported.", table.rows.len())),
-                        Err(e) => app.toast_error(e.to_string()),
-                    }
+            {
+                let table = export::build(&app.db, what, &app.data.activities, &app.data.metrics);
+                let text = if ext == "csv" {
+                    export::to_csv(&table)
+                } else {
+                    export::to_json(&table)
+                };
+                match std::fs::write(&dest, text) {
+                    Ok(()) => app.toast(trf!("{} linhas exportadas.", "{} rows exported.", table.rows.len())),
+                    Err(e) => app.toast_error(e.to_string()),
                 }
             }
         }
@@ -323,7 +410,12 @@ fn restore(app: &mut App, src: &std::path::Path) {
     let result = backup::restore(src, &app.paths.db, &app.paths.backups);
     match Db::open(&app.paths.db, Some(&app.paths.backups)) {
         Ok(db) => app.db = db,
-        Err(e) => return app.toast_error(trf!("Erro ao reabrir o banco: {e}", "Error reopening the database: {e}")),
+        Err(e) => {
+            return app.toast_error(trf!(
+                "Erro ao reabrir o banco: {e}",
+                "Error reopening the database: {e}"
+            ));
+        }
     }
     match result {
         Ok(()) => {
@@ -345,7 +437,13 @@ fn updates(app: &mut App, ui: &mut Ui) {
     widgets::section(ui, tr!("Atualizações", "Updates"));
     let mut auto = app.settings.auto_update;
     if ui
-        .checkbox(&mut auto, tr!("Procurar novas versões automaticamente (uma vez por dia)", "Check for new versions automatically (once a day)"))
+        .checkbox(
+            &mut auto,
+            tr!(
+                "Procurar novas versões automaticamente (uma vez por dia)",
+                "Check for new versions automatically (once a day)"
+            ),
+        )
         .changed()
     {
         app.settings.auto_update = auto;
@@ -364,16 +462,25 @@ fn updates(app: &mut App, ui: &mut Ui) {
                 ui.spinner();
             }
             Estado::EmDia => {
-                ui.label(RichText::new(trf!("Você está na versão mais recente (v{}).", "You have the latest version (v{}).", update::VERSAO_ATUAL)).color(widgets::GOOD));
+                ui.label(
+                    RichText::new(trf!(
+                        "Você está na versão mais recente (v{}).",
+                        "You have the latest version (v{}).",
+                        update::VERSAO_ATUAL
+                    ))
+                    .color(widgets::GOOD),
+                );
             }
             Estado::FalhaVerificacao(e) => {
                 ui.label(RichText::new(e).color(widgets::WARN));
             }
             Estado::Disponivel(v) => {
-                if v.instalavel() {
-                    if ui.button(RichText::new(trf!("⬆ Instalar v{}", "⬆ Install v{}", v.numero)).strong()).clicked() {
-                        update::instalar(v.clone());
-                    }
+                if v.instalavel()
+                    && ui
+                        .button(RichText::new(trf!("⬆ Instalar v{}", "⬆ Install v{}", v.numero)).strong())
+                        .clicked()
+                {
+                    update::instalar(v.clone());
                 }
                 ui.hyperlink_to(tr!("ver novidades", "see what's new"), &v.pagina);
             }

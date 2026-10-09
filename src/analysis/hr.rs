@@ -161,11 +161,6 @@ pub fn pace_hr_points(st: &Stream) -> Vec<[f64; 2]> {
     out
 }
 
-/// Average heart rate of each full kilometer (reference tests table).
-pub fn hr_per_km(splits: &[super::splits::Split]) -> Vec<Option<f64>> {
-    splits.iter().map(|s| s.avg_hr).collect()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -180,7 +175,13 @@ mod tests {
                 if i > 0 {
                     d += v;
                 }
-                Sample { t: i as i64, speed: Some(v), distance: Some(d), hr: Some(hr(i)), ..Default::default() }
+                Sample {
+                    t: i as i64,
+                    speed: Some(v),
+                    distance: Some(d),
+                    hr: Some(hr(i)),
+                    ..Default::default()
+                }
             })
             .collect();
         Stream::build(&samples, Modality::RoadRun, 1.0)
@@ -189,7 +190,11 @@ mod tests {
     #[test]
     fn zones_add_up_to_the_recorded_time() {
         let st = run(1801, |_| 2.8, |i| if i < 900 { 130.0 } else { 175.0 });
-        let z = Settings { hr_max: Some(200.0), ..Default::default() }.zones(None);
+        let z = Settings {
+            hr_max: Some(200.0),
+            ..Default::default()
+        }
+        .zones(None);
         let t = time_in_zones(&st, &z);
         assert!((t.iter().sum::<f64>() - 1800.0).abs() < 1e-6);
         assert!((t[2] - 899.0).abs() <= 1.0, "{t:?}"); // 130 → zone 2 (120-139)
@@ -230,7 +235,15 @@ mod tests {
         // steady 6:00/km for 20 min, then alternating 1-minute surges
         let st = run(
             2401,
-            |i| if i < 1200 { 1000.0 / 360.0 } else if (i / 30) % 2 == 0 { 2.0 } else { 4.0 },
+            |i| {
+                if i < 1200 {
+                    1000.0 / 360.0
+                } else if (i / 30) % 2 == 0 {
+                    2.0
+                } else {
+                    4.0
+                }
+            },
             |_| 165.0,
         );
         let pts = pace_hr_points(&st);

@@ -22,6 +22,7 @@ pub enum Tab {
     Zones,
     Drift,
     Map,
+    Exercises,
     Notes,
     Quality,
 }
@@ -33,6 +34,8 @@ pub struct State {
     stream: Option<Stream>,
     laps: Vec<Lap>,
     pub tab: Tab,
+    /// Tab to show when the next activity opens (set by other pages).
+    pub open_tab: Option<Tab>,
     x_distance: bool,
     split_step: f64,
     custom_split: String,
@@ -54,7 +57,10 @@ impl Edit {
     fn new(a: &Activity) -> Edit {
         Edit {
             a: a.clone(),
-            distance_km: a.distance_override_m.map(|d| format::num_trim(d / 1000.0, 3)).unwrap_or_default(),
+            distance_km: a
+                .distance_override_m
+                .map(|d| format::num_trim(d / 1000.0, 3))
+                .unwrap_or_default(),
             incline: a.incline_pct.map(|v| format::num_trim(v, 1)).unwrap_or_default(),
             weight: a.body_weight.map(|v| format::num_trim(v, 1)).unwrap_or_default(),
         }
@@ -79,7 +85,7 @@ fn load(app: &mut App, id: i64) {
     st.ref_tests = ref_tests;
     st.edit = Some(Edit::new(&a));
     if !keep_tab {
-        st.tab = Tab::Charts;
+        st.tab = st.open_tab.take().unwrap_or(Tab::Charts);
         st.split_step = 1000.0;
         st.confirm_delete = false;
     }
@@ -125,10 +131,11 @@ pub fn show(app: &mut App, ui: &mut Ui, id: i64) {
     if has_gps {
         tabs.push((Tab::Map, tr!("Percurso", "Route")));
     }
-    tabs.push((Tab::Notes, tr!("Notas e ajustes", "Notes and edits")));
-    if has_stream {
-        tabs.push((Tab::Quality, tr!("Qualidade dos dados", "Data quality")));
+    if a.modality == Modality::Strength {
+        tabs.insert(0, (Tab::Exercises, tr!("Exercícios", "Exercises")));
     }
+    tabs.push((Tab::Notes, tr!("Notas e ajustes", "Notes and edits")));
+    tabs.push((Tab::Quality, tr!("Dados e arquivo", "Data and file")));
     if !tabs.iter().any(|(t, _)| *t == app.pages.activity.tab) {
         app.pages.activity.tab = tabs[0].0;
     }
@@ -139,16 +146,41 @@ pub fn show(app: &mut App, ui: &mut Ui, id: i64) {
     });
     ui.separator();
 
-    egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| match app.pages.activity.tab {
-        Tab::Charts => charts_tab(app, ui, &a),
-        Tab::Splits => splits_tab(app, ui),
-        Tab::Laps => laps_tab(app, ui, &a),
-        Tab::Zones => zones_tab(ui, &m),
-        Tab::Drift => drift_tab(app, ui),
-        Tab::Map => map_tab(app, ui),
-        Tab::Notes => notes_tab(app, ui, &a),
-        Tab::Quality => quality_tab(ui, &m),
-    });
+    egui::ScrollArea::vertical()
+        .auto_shrink(false)
+        .show(ui, |ui| match app.pages.activity.tab {
+            Tab::Charts => charts_tab(app, ui, &a),
+            Tab::Splits => splits_tab(app, ui),
+            Tab::Laps => laps_tab(app, ui, &a),
+            Tab::Zones => zones_tab(ui, &m),
+            Tab::Drift => drift_tab(app, ui),
+            Tab::Map => map_tab(app, ui),
+            Tab::Exercises => {
+                super::strength::sets_tab(app, ui, a.id);
+                let watch = app.db.fit_sets(a.id).unwrap_or_default();
+                if !watch.is_empty() {
+                    widgets::section(ui, tr!("Séries registradas pelo relógio", "Sets recorded by the watch"));
+                    for (i, s) in watch.iter().enumerate() {
+                        ui.label(format!(
+                            "{}. {} {} {}",
+                            i + 1,
+                            s.reps.map(|r| trf!("{r} reps", "{r} reps")).unwrap_or_default(),
+                            s.weight_kg
+                                .map(|w| format!("× {} kg", format::num_trim(w, 1)))
+                                .unwrap_or_default(),
+                            s.duration_s
+                                .map(|d| format!("· {}", format::duration(d)))
+                                .unwrap_or_default()
+                        ));
+                    }
+                }
+            }
+            Tab::Notes => notes_tab(app, ui, &a),
+            Tab::Quality => {
+                quality_tab(ui, &m);
+                file_section(app, ui, &a);
+            }
+        });
 
     let ctx = ui.ctx().clone();
     if widgets::confirm_window(
@@ -181,7 +213,10 @@ fn header(app: &mut App, ui: &mut Ui, a: &Activity) {
         ui.label(RichText::new(a.title()).size(22.0).strong());
         widgets::modality_chip(ui, a.modality);
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
-            if ui.button(RichText::new(tr!("🗑 Excluir", "🗑 Delete")).color(widgets::BAD)).clicked() {
+            if ui
+                .button(RichText::new(tr!("🗑 Excluir", "🗑 Delete")).color(widgets::BAD))
+                .clicked()
+            {
                 app.pages.activity.confirm_delete = true;
             }
             if a.source == "manual" && ui.button(tr!("✏ Editar", "✏ Edit")).clicked() {
@@ -196,7 +231,11 @@ fn header(app: &mut App, ui: &mut Ui, a: &Activity) {
                     "Marque as outras atividades na lista e clique em Comparar.",
                     "Tick the other activities in the list and click Compare."
                 ));
-                app.go(Page::Activities(if a.modality.is_run() { None } else { Some(a.modality) }));
+                app.go(Page::Activities(if a.modality.is_run() {
+                    None
+                } else {
+                    Some(a.modality)
+                }));
             }
         });
     });
@@ -214,17 +253,26 @@ fn header(app: &mut App, ui: &mut Ui, a: &Activity) {
 fn summary_cards(ui: &mut Ui, a: &Activity, m: &Metrics) {
     let mut cards: Vec<(String, String, Option<String>)> = Vec::new();
     if let Some(d) = a.distance() {
-        let sub = a.distance_override_m.map(|_| tr!("corrigida manualmente", "manually corrected").to_string());
+        let sub = a
+            .distance_override_m
+            .map(|_| tr!("corrigida manualmente", "manually corrected").to_string());
         cards.push((tr!("Distância", "Distance").into(), format::km(d), sub));
     }
     cards.push((
         tr!("Duração", "Duration").into(),
         format::opt_duration(a.elapsed_s.or(a.timer_s)),
-        a.moving_s.map(|mv| trf!("em movimento {}", "moving {}", format::duration(mv))),
+        a.moving_s
+            .map(|mv| trf!("em movimento {}", "moving {}", format::duration(mv))),
     ));
     if a.modality.is_run() {
-        let kmh = a.pace_s_per_km().map(|p| format!("{} km/h", format::num(format::pace_to_kmh(p), 1)));
-        cards.push((tr!("Pace médio", "Avg pace").into(), format::opt_pace(a.pace_s_per_km()), kmh));
+        let kmh = a
+            .pace_s_per_km()
+            .map(|p| format!("{} km/h", format::num(format::pace_to_kmh(p), 1)));
+        cards.push((
+            tr!("Pace médio", "Avg pace").into(),
+            format::opt_pace(a.pace_s_per_km()),
+            kmh,
+        ));
     }
     if a.avg_hr.is_some() {
         cards.push((
@@ -255,7 +303,9 @@ fn summary_cards(ui: &mut Ui, a: &Activity, m: &Metrics) {
     if a.modality == Modality::Treadmill {
         cards.push((
             tr!("Inclinação", "Incline").into(),
-            a.incline_pct.map(|v| format!("{}%", format::num_trim(v, 1))).unwrap_or_else(format::dash),
+            a.incline_pct
+                .map(|v| format!("{}%", format::num_trim(v, 1)))
+                .unwrap_or_else(format::dash),
             Some(tr!("editável em Notas", "editable in Notes").into()),
         ));
     }
@@ -265,19 +315,32 @@ fn summary_cards(ui: &mut Ui, a: &Activity, m: &Metrics) {
             "rpe" => tr!("pelo RPE", "from RPE"),
             _ => tr!("estimada", "estimated"),
         };
-        cards.push((tr!("Carga", "Load").into(), format!("{}", m.load.round()), Some(src.into())));
+        cards.push((
+            tr!("Carga", "Load").into(),
+            format!("{}", m.load.round()),
+            Some(src.into()),
+        ));
     }
     if let Some(p) = a.avg_power {
-        cards.push((tr!("Potência", "Power").into(), format!("{} W", p.round()), a.max_power.map(|v| trf!("máx {} W", "max {} W", v.round()))));
+        cards.push((
+            tr!("Potência", "Power").into(),
+            format!("{} W", p.round()),
+            a.max_power.map(|v| trf!("máx {} W", "max {} W", v.round())),
+        ));
     }
     if let Some(t) = a.avg_temp {
-        cards.push((tr!("Temperatura", "Temperature").into(), format!("{} °C", format::num(t, 0)), None));
+        cards.push((
+            tr!("Temperatura", "Temperature").into(),
+            format!("{} °C", format::num(t, 0)),
+            None,
+        ));
     }
     if let Some(te) = a.training_effect {
         cards.push((
             tr!("Efeito de treino", "Training effect").into(),
             format::num(te, 1),
-            a.anaerobic_te.map(|v| trf!("anaeróbico {}", "anaerobic {}", format::num(v, 1))),
+            a.anaerobic_te
+                .map(|v| trf!("anaeróbico {}", "anaerobic {}", format::num(v, 1))),
         ));
     }
     widgets::card_grid(ui, 150.0, &cards);
@@ -295,7 +358,10 @@ fn xy(st: &Stream, x_distance: bool, y: impl Fn(usize) -> Option<f64>) -> Vec<[f
 
 fn charts_tab(app: &mut App, ui: &mut Ui, a: &Activity) {
     let st_ref = &mut app.pages.activity;
-    let has_dist = st_ref.stream.as_ref().is_some_and(|s| s.dist.iter().any(Option::is_some));
+    let has_dist = st_ref
+        .stream
+        .as_ref()
+        .is_some_and(|s| s.dist.iter().any(Option::is_some));
     ui.horizontal(|ui| {
         ui.label(tr!("Eixo X:", "X axis:"));
         ui.selectable_value(&mut st_ref.x_distance, false, tr!("Tempo", "Time"));
@@ -338,7 +404,11 @@ fn charts_tab(app: &mut App, ui: &mut Ui, a: &Activity) {
             .filter(|p| p[1] > 0.8)
             .map(|p| [p[0], (1000.0 / p[1]).min(900.0)])
             .collect();
-        let mut o = mk("pace", Axis::Pace, tr!("Pace (suavizado em 15 s)", "Pace (15 s smoothing)"));
+        let mut o = mk(
+            "pace",
+            Axis::Pace,
+            tr!("Pace (suavizado em 15 s)", "Pace (15 s smoothing)"),
+        );
         o.invert_y = true;
         if let Some(p) = a.pace_s_per_km() {
             o.hlines.push((p, tr!("média", "average").into()));
@@ -356,7 +426,11 @@ fn charts_tab(app: &mut App, ui: &mut Ui, a: &Activity) {
         charts::line_chart(
             ui,
             mk("cad", Axis::Cadence, tr!("Cadência", "Cadence")),
-            vec![Series::dots(tr!("Cadência", "Cadence"), widgets::CADENCE, charts::downsample(&pts, 900))],
+            vec![Series::dots(
+                tr!("Cadência", "Cadence"),
+                widgets::CADENCE,
+                charts::downsample(&pts, 900),
+            )],
         );
     }
     if st.alt.iter().any(Option::is_some) && a.modality != Modality::Treadmill {
@@ -408,21 +482,35 @@ fn splits_tab(app: &mut App, ui: &mut Ui) {
             }
         }
         ui.label(tr!("ou", "or"));
-        let r = ui.add(egui::TextEdit::singleline(&mut s.custom_split).hint_text(tr!("metros", "meters")).desired_width(70.0));
-        if r.changed() {
-            if let Some(v) = format::parse_num(&s.custom_split).filter(|v| *v >= 100.0) {
-                s.split_step = v;
-            }
+        let r = ui.add(
+            egui::TextEdit::singleline(&mut s.custom_split)
+                .hint_text(tr!("metros", "meters"))
+                .desired_width(70.0),
+        );
+        if r.changed()
+            && let Some(v) = format::parse_num(&s.custom_split).filter(|v| *v >= 100.0)
+        {
+            s.split_step = v;
         }
         ui.label("m");
     });
     let Some(st) = s.stream.as_ref() else { return };
     let rows = splits::splits(st, s.split_step);
     if rows.is_empty() {
-        widgets::empty_state(ui, tr!("Sem dados de distância para calcular splits.", "No distance data to compute splits."));
+        widgets::empty_state(
+            ui,
+            tr!(
+                "Sem dados de distância para calcular splits.",
+                "No distance data to compute splits."
+            ),
+        );
         return;
     }
-    let best = rows.iter().filter(|r| r.distance_m >= s.split_step * 0.9).map(|r| r.pace_s_km).fold(f64::MAX, f64::min);
+    let best = rows
+        .iter()
+        .filter(|r| r.distance_m >= s.split_step * 0.9)
+        .map(|r| r.pace_s_km)
+        .fold(f64::MAX, f64::min);
     let unit_km = s.split_step / 1000.0;
     TableBuilder::new(ui)
         .striped(true)
@@ -458,7 +546,11 @@ fn splits_tab(app: &mut App, ui: &mut Ui) {
                     });
                     row.col(|ui| {
                         let t = RichText::new(format::pace_unit(r.pace_s_km));
-                        ui.label(if (r.pace_s_km - best).abs() < 0.5 { t.strong().color(widgets::GOOD) } else { t });
+                        ui.label(if (r.pace_s_km - best).abs() < 0.5 {
+                            t.strong().color(widgets::GOOD)
+                        } else {
+                            t
+                        });
                     });
                     row.col(|ui| {
                         ui.label(format::bpm(r.avg_hr));
@@ -467,7 +559,11 @@ fn splits_tab(app: &mut App, ui: &mut Ui) {
                         ui.label(format::bpm(r.max_hr));
                     });
                     row.col(|ui| {
-                        ui.label(r.avg_cadence.map(|c| format!("{} spm", c.round())).unwrap_or_else(format::dash));
+                        ui.label(
+                            r.avg_cadence
+                                .map(|c| format!("{} spm", c.round()))
+                                .unwrap_or_else(format::dash),
+                        );
                     });
                     row.col(|ui| {
                         ui.label(format!("+{} / -{} m", r.gain_m.round() as i64, r.loss_m.round() as i64));
@@ -483,17 +579,34 @@ fn splits_tab(app: &mut App, ui: &mut Ui) {
         o.title = Some(tr!("Pace por split", "Pace per split"));
         o.height = 170.0;
         o.invert_y = true;
-        charts::line_chart(&mut c[0], o, vec![Series::line("Pace", widgets::PACE, pace.clone()), Series::dots("Pace", widgets::PACE, pace)]);
+        charts::line_chart(
+            &mut c[0],
+            o,
+            vec![
+                Series::line("Pace", widgets::PACE, pace.clone()),
+                Series::dots("Pace", widgets::PACE, pace),
+            ],
+        );
         let mut o = ChartOpts::new("splits-hr", Axis::Plain, Axis::Bpm);
         o.title = Some(tr!("FC média por split", "Avg HR per split"));
         o.height = 170.0;
-        charts::line_chart(&mut c[1], o, vec![Series::line(tr!("FC", "HR"), widgets::HR, hr.clone()), Series::dots(tr!("FC", "HR"), widgets::HR, hr)]);
+        charts::line_chart(
+            &mut c[1],
+            o,
+            vec![
+                Series::line(tr!("FC", "HR"), widgets::HR, hr.clone()),
+                Series::dots(tr!("FC", "HR"), widgets::HR, hr),
+            ],
+        );
     });
 }
 
 fn laps_tab(app: &mut App, ui: &mut Ui, a: &Activity) {
     let laps = &app.pages.activity.laps;
-    ui.label(weak(ui, tr!("Voltas como gravadas pelo relógio.", "Laps as recorded by the watch.")));
+    ui.label(weak(
+        ui,
+        tr!("Voltas como gravadas pelo relógio.", "Laps as recorded by the watch."),
+    ));
     TableBuilder::new(ui)
         .striped(true)
         .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
@@ -541,7 +654,11 @@ fn laps_tab(app: &mut App, ui: &mut Ui, a: &Activity) {
                         ui.label(format::bpm(l.max_hr));
                     });
                     row.col(|ui| {
-                        ui.label(l.avg_cadence.map(|c| format!("{} spm", c.round())).unwrap_or_else(format::dash));
+                        ui.label(
+                            l.avg_cadence
+                                .map(|c| format!("{} spm", c.round()))
+                                .unwrap_or_else(format::dash),
+                        );
                     });
                     row.col(|ui| {
                         ui.label(match (l.ascent_m, l.descent_m) {
@@ -560,7 +677,10 @@ pub fn zones_table(ui: &mut Ui, m: &Metrics) {
         widgets::empty_state(ui, tr!("Sem dados de frequência cardíaca.", "No heart-rate data."));
         return;
     }
-    let zones = crate::settings::Zones { lower: m.zone_lower, max: m.zone_max };
+    let zones = crate::settings::Zones {
+        lower: m.zone_lower,
+        max: m.zone_max,
+    };
     let names = [
         tr!("Abaixo da Z1", "Below Z1"),
         tr!("Z1 · Recuperação", "Z1 · Recovery"),
@@ -581,7 +701,10 @@ pub fn zones_table(ui: &mut Ui, m: &Metrics) {
             format!("{}–{} bpm", lo.round(), hi.round())
         };
         ui.horizontal(|ui| {
-            ui.add_sized([150.0, 20.0], egui::Label::new(RichText::new(names[z]).color(widgets::ZONES[z])));
+            ui.add_sized(
+                [150.0, 20.0],
+                egui::Label::new(RichText::new(names[z]).color(widgets::ZONES[z])),
+            );
             ui.add_sized([95.0, 20.0], egui::Label::new(weak(ui, range)));
             let frac = (t / total) as f32;
             ui.add(
@@ -623,7 +746,12 @@ fn drift_tab(app: &mut App, ui: &mut Ui) {
     ));
     ui.horizontal(|ui| {
         ui.label(tr!("Ignorar aquecimento:", "Skip warm-up:"));
-        ui.add(egui::Slider::new(&mut s.drift_skip_min, 0.0..=20.0).step_by(1.0).fixed_decimals(0).suffix(" min"));
+        ui.add(
+            egui::Slider::new(&mut s.drift_skip_min, 0.0..=20.0)
+                .step_by(1.0)
+                .fixed_decimals(0)
+                .suffix(" min"),
+        );
     });
     let Some(st) = s.stream.as_ref() else { return };
     let Some(d) = hr::cardiac_drift(st, s.drift_skip_min * 60.0) else {
@@ -640,49 +768,78 @@ fn drift_tab(app: &mut App, ui: &mut Ui) {
 }
 
 pub fn drift_table(ui: &mut Ui, d: &hr::Drift) {
-    let pace = |s: Option<f64>| s.filter(|v| *v > 0.3).map(|v| format::pace_unit(1000.0 / v)).unwrap_or_else(format::dash);
-    egui::Grid::new("drift").striped(true).min_col_width(140.0).show(ui, |ui| {
-        ui.label("");
-        ui.label(RichText::new(tr!("1ª metade", "1st half")).strong());
-        ui.label(RichText::new(tr!("2ª metade", "2nd half")).strong());
-        ui.label(RichText::new(tr!("Diferença", "Difference")).strong());
-        ui.end_row();
-        ui.label(tr!("FC média", "Avg HR"));
-        ui.label(format::bpm(Some(d.hr1)));
-        ui.label(format::bpm(Some(d.hr2)));
-        ui.label(format!("{} ({})", format::bpm(Some(d.hr2 - d.hr1)), format::pct_signed(d.hr_pct)));
-        ui.end_row();
-        ui.label("Pace");
-        ui.label(pace(d.speed1));
-        ui.label(pace(d.speed2));
-        let pace_diff = match (d.speed1, d.speed2) {
-            (Some(a), Some(b)) if a > 0.3 && b > 0.3 => {
-                let p1 = 1000.0 / a;
-                let p2 = 1000.0 / b;
-                let sign = if p2 > p1 { "+" } else { "-" };
-                format!("{sign}{} s/km ({})", (p2 - p1).abs().round(), format::pct_signed((p2 - p1) / p1 * 100.0))
-            }
-            _ => format::dash(),
-        };
-        ui.label(pace_diff);
-        ui.end_row();
-        ui.label(RichText::new(tr!("Desacoplamento Pa:FC", "Pa:HR decoupling")).strong());
-        ui.label("");
-        ui.label("");
-        let dec = d.decoupling_pct;
-        let color = match dec {
-            Some(v) if v < 5.0 => widgets::GOOD,
-            Some(v) if v < 10.0 => widgets::WARN,
-            _ => widgets::BAD,
-        };
-        ui.label(RichText::new(dec.map(|v| format!("{}%", format::num(v, 1))).unwrap_or_else(format::dash)).strong().color(color));
-        ui.end_row();
-    });
+    let pace = |s: Option<f64>| {
+        s.filter(|v| *v > 0.3)
+            .map(|v| format::pace_unit(1000.0 / v))
+            .unwrap_or_else(format::dash)
+    };
+    egui::Grid::new("drift")
+        .striped(true)
+        .min_col_width(140.0)
+        .show(ui, |ui| {
+            ui.label("");
+            ui.label(RichText::new(tr!("1ª metade", "1st half")).strong());
+            ui.label(RichText::new(tr!("2ª metade", "2nd half")).strong());
+            ui.label(RichText::new(tr!("Diferença", "Difference")).strong());
+            ui.end_row();
+            ui.label(tr!("FC média", "Avg HR"));
+            ui.label(format::bpm(Some(d.hr1)));
+            ui.label(format::bpm(Some(d.hr2)));
+            ui.label(format!(
+                "{} ({})",
+                format::bpm(Some(d.hr2 - d.hr1)),
+                format::pct_signed(d.hr_pct)
+            ));
+            ui.end_row();
+            ui.label("Pace");
+            ui.label(pace(d.speed1));
+            ui.label(pace(d.speed2));
+            let pace_diff = match (d.speed1, d.speed2) {
+                (Some(a), Some(b)) if a > 0.3 && b > 0.3 => {
+                    let p1 = 1000.0 / a;
+                    let p2 = 1000.0 / b;
+                    let sign = if p2 > p1 { "+" } else { "-" };
+                    format!(
+                        "{sign}{} s/km ({})",
+                        (p2 - p1).abs().round(),
+                        format::pct_signed((p2 - p1) / p1 * 100.0)
+                    )
+                }
+                _ => format::dash(),
+            };
+            ui.label(pace_diff);
+            ui.end_row();
+            ui.label(RichText::new(tr!("Desacoplamento Pa:FC", "Pa:HR decoupling")).strong());
+            ui.label("");
+            ui.label("");
+            let dec = d.decoupling_pct;
+            let color = match dec {
+                Some(v) if v < 5.0 => widgets::GOOD,
+                Some(v) if v < 10.0 => widgets::WARN,
+                _ => widgets::BAD,
+            };
+            ui.label(
+                RichText::new(
+                    dec.map(|v| format!("{}%", format::num(v, 1)))
+                        .unwrap_or_else(format::dash),
+                )
+                .strong()
+                .color(color),
+            );
+            ui.end_row();
+        });
 }
 
 fn map_tab(app: &mut App, ui: &mut Ui) {
-    let Some(st) = app.pages.activity.stream.as_ref() else { return };
-    let pts: Vec<(usize, f64, f64)> = st.pos.iter().enumerate().filter_map(|(i, p)| p.map(|(la, lo)| (i, la, lo))).collect();
+    let Some(st) = app.pages.activity.stream.as_ref() else {
+        return;
+    };
+    let pts: Vec<(usize, f64, f64)> = st
+        .pos
+        .iter()
+        .enumerate()
+        .filter_map(|(i, p)| p.map(|(la, lo)| (i, la, lo)))
+        .collect();
     if pts.len() < 2 {
         widgets::empty_state(ui, tr!("Sem GPS.", "No GPS."));
         return;
@@ -713,53 +870,61 @@ fn map_tab(app: &mut App, ui: &mut Ui) {
     let cy = rect.center().y as f64;
     let mlo = (lo0 + lo1) / 2.0;
     let mla = (la0 + la1) / 2.0;
-    let to_screen = |la: f64, lo: f64| egui::pos2((cx + (lo - mlo) * kx * scale) as f32, (cy - (la - mla) * scale) as f32);
+    let to_screen =
+        |la: f64, lo: f64| egui::pos2((cx + (lo - mlo) * kx * scale) as f32, (cy - (la - mla) * scale) as f32);
     let screen: Vec<egui::Pos2> = pts.iter().map(|&(_, la, lo)| to_screen(la, lo)).collect();
-    painter.add(egui::Shape::line(screen.clone(), egui::Stroke::new(3.0, widgets::ACCENT)));
+    painter.add(egui::Shape::line(
+        screen.clone(),
+        egui::Stroke::new(3.0, widgets::ACCENT),
+    ));
     // km markers
     let mut next_km = 1000.0;
     for (k, &(i, _, _)) in pts.iter().enumerate() {
-        if let Some(d) = st.dist[i] {
-            if d >= next_km {
-                painter.circle_filled(screen[k], 4.0, Color32::WHITE);
-                painter.text(
-                    screen[k] + egui::vec2(6.0, -6.0),
-                    egui::Align2::LEFT_BOTTOM,
-                    format!("{}", (next_km / 1000.0) as i64),
-                    egui::FontId::proportional(12.0),
-                    ui.visuals().text_color(),
-                );
-                next_km += 1000.0;
-            }
+        if let Some(d) = st.dist[i]
+            && d >= next_km
+        {
+            painter.circle_filled(screen[k], 4.0, Color32::WHITE);
+            painter.text(
+                screen[k] + egui::vec2(6.0, -6.0),
+                egui::Align2::LEFT_BOTTOM,
+                format!("{}", (next_km / 1000.0) as i64),
+                egui::FontId::proportional(12.0),
+                ui.visuals().text_color(),
+            );
+            next_km += 1000.0;
         }
     }
     painter.circle_filled(screen[0], 7.0, widgets::GOOD);
     painter.circle_filled(*screen.last().unwrap(), 7.0, widgets::BAD);
-    if let Some(hp) = resp.hover_pos() {
-        if let Some((k, p)) = screen
-            .iter()
-            .enumerate()
-            .min_by(|a, b| a.1.distance_sq(hp).partial_cmp(&b.1.distance_sq(hp)).unwrap_or(std::cmp::Ordering::Equal))
-        {
-            if p.distance(hp) < 30.0 {
-                let i = pts[k].0;
-                painter.circle_stroke(*p, 7.0, egui::Stroke::new(2.0, Color32::WHITE));
-                let mut text = format::duration(st.t[i]);
-                if let Some(d) = st.dist[i] {
-                    text.push_str(&format!(" · {}", format::km(d)));
-                }
-                if let Some(h) = st.hr[i] {
-                    text.push_str(&format!(" · {}", format::bpm(Some(h))));
-                }
-                if let Some(v) = st.speed[i].filter(|v| *v > 0.5) {
-                    text.push_str(&format!(" · {}", format::pace_unit(1000.0 / v)));
-                }
-                egui::Tooltip::always_open(ui.ctx().clone(), ui.layer_id(), egui::Id::new("map-tip"), egui::PopupAnchor::Pointer)
-                    .show(|ui| {
-                        ui.label(text);
-                    });
-            }
+    if let Some(hp) = resp.hover_pos()
+        && let Some((k, p)) = screen.iter().enumerate().min_by(|a, b| {
+            a.1.distance_sq(hp)
+                .partial_cmp(&b.1.distance_sq(hp))
+                .unwrap_or(std::cmp::Ordering::Equal)
+        })
+        && p.distance(hp) < 30.0
+    {
+        let i = pts[k].0;
+        painter.circle_stroke(*p, 7.0, egui::Stroke::new(2.0, Color32::WHITE));
+        let mut text = format::duration(st.t[i]);
+        if let Some(d) = st.dist[i] {
+            text.push_str(&format!(" · {}", format::km(d)));
         }
+        if let Some(h) = st.hr[i] {
+            text.push_str(&format!(" · {}", format::bpm(Some(h))));
+        }
+        if let Some(v) = st.speed[i].filter(|v| *v > 0.5) {
+            text.push_str(&format!(" · {}", format::pace_unit(1000.0 / v)));
+        }
+        egui::Tooltip::always_open(
+            ui.ctx().clone(),
+            ui.layer_id(),
+            egui::Id::new("map-tip"),
+            egui::PopupAnchor::Pointer,
+        )
+        .show(|ui| {
+            ui.label(text);
+        });
     }
     ui.horizontal(|ui| {
         widgets::chip(ui, tr!("● início", "● start"), widgets::GOOD);
@@ -770,85 +935,98 @@ fn map_tab(app: &mut App, ui: &mut Ui) {
 
 fn notes_tab(app: &mut App, ui: &mut Ui, a: &Activity) {
     let tests = app.pages.activity.ref_tests.clone();
-    let Some(e) = app.pages.activity.edit.as_mut() else { return };
+    let Some(e) = app.pages.activity.edit.as_mut() else {
+        return;
+    };
     let mut save = false;
-    egui::Grid::new("notes").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-        ui.label(tr!("Título", "Title"));
-        let mut name = e.a.name.clone().unwrap_or_default();
-        if ui.add(egui::TextEdit::singleline(&mut name).desired_width(320.0)).changed() {
-            e.a.name = Some(name).filter(|s| !s.trim().is_empty());
-        }
-        ui.end_row();
-        ui.label(tr!("Modalidade", "Type"));
-        egui::ComboBox::from_id_salt("modality").selected_text(e.a.modality.label()).show_ui(ui, |ui| {
-            for m in Modality::ALL {
-                ui.selectable_value(&mut e.a.modality, m, m.label());
+    egui::Grid::new("notes")
+        .num_columns(2)
+        .spacing([12.0, 8.0])
+        .show(ui, |ui| {
+            ui.label(tr!("Título", "Title"));
+            let mut name = e.a.name.clone().unwrap_or_default();
+            if ui
+                .add(egui::TextEdit::singleline(&mut name).desired_width(320.0))
+                .changed()
+            {
+                e.a.name = Some(name).filter(|s| !s.trim().is_empty());
             }
-        });
-        ui.end_row();
-        if e.a.modality == Modality::Treadmill {
-            ui.label(tr!("Inclinação da esteira (%)", "Treadmill incline (%)"));
-            widgets::opt_number_edit(ui, &mut e.a.incline_pct, &mut e.incline, 80.0);
             ui.end_row();
-            ui.label(tr!("Distância corrigida (km)", "Corrected distance (km)"));
-            ui.horizontal(|ui| {
-                let mut km = e.a.distance_override_m.map(|d| d / 1000.0);
-                if widgets::opt_number_edit(ui, &mut km, &mut e.distance_km, 80.0) {
-                    e.a.distance_override_m = km.filter(|v| *v > 0.0).map(|v| v * 1000.0);
-                }
-                ui.label(weak(
-                    ui,
-                    trf!(
-                        "relógio: {} · use o valor do painel da esteira",
-                        "watch: {} · use the treadmill display value",
-                        format::opt_km(a.distance_m)
-                    ),
-                ));
-            });
-            ui.end_row();
-        }
-        ui.label(tr!("Observações", "Notes"));
-        let mut notes = e.a.notes.clone().unwrap_or_default();
-        if ui
-            .add(
-                egui::TextEdit::multiline(&mut notes)
-                    .desired_rows(4)
-                    .desired_width(420.0)
-                    .hint_text(tr!("Ex.: Estava muito calor. Dormi mal. Joguei tênis no dia anterior.", "E.g.: It was very hot. Slept badly. Played tennis the day before.")),
-            )
-            .changed()
-        {
-            e.a.notes = Some(notes).filter(|s| !s.trim().is_empty());
-        }
-        ui.end_row();
-        let scale = |ui: &mut Ui, v: &mut Option<i64>, max: i64| {
-            ui.horizontal(|ui| {
-                if ui.selectable_label(v.is_none(), "—").clicked() {
-                    *v = None;
-                }
-                for i in 1..=max {
-                    if ui.selectable_label(*v == Some(i), i.to_string()).clicked() {
-                        *v = Some(i);
+            ui.label(tr!("Modalidade", "Type"));
+            egui::ComboBox::from_id_salt("modality")
+                .selected_text(e.a.modality.label())
+                .show_ui(ui, |ui| {
+                    for m in Modality::ALL {
+                        ui.selectable_value(&mut e.a.modality, m, m.label());
                     }
-                }
-            });
-        };
-        ui.label(tr!("Esforço percebido (RPE 1–10)", "Perceived effort (RPE 1–10)"));
-        scale(ui, &mut e.a.rpe, 10);
-        ui.end_row();
-        ui.label(tr!("Qualidade do sono (1–5)", "Sleep quality (1–5)"));
-        scale(ui, &mut e.a.sleep_quality, 5);
-        ui.end_row();
-        ui.label(tr!("Fadiga (1–5)", "Fatigue (1–5)"));
-        scale(ui, &mut e.a.fatigue, 5);
-        ui.end_row();
-        ui.label(tr!("Dor muscular (1–5)", "Muscle soreness (1–5)"));
-        scale(ui, &mut e.a.soreness, 5);
-        ui.end_row();
-        ui.label(tr!("Peso corporal (kg)", "Body weight (kg)"));
-        widgets::opt_number_edit(ui, &mut e.a.body_weight, &mut e.weight, 80.0);
-        ui.end_row();
-    });
+                });
+            ui.end_row();
+            if e.a.modality == Modality::Treadmill {
+                ui.label(tr!("Inclinação da esteira (%)", "Treadmill incline (%)"));
+                widgets::opt_number_edit(ui, &mut e.a.incline_pct, &mut e.incline, 80.0);
+                ui.end_row();
+                ui.label(tr!("Distância corrigida (km)", "Corrected distance (km)"));
+                ui.horizontal(|ui| {
+                    let mut km = e.a.distance_override_m.map(|d| d / 1000.0);
+                    if widgets::opt_number_edit(ui, &mut km, &mut e.distance_km, 80.0) {
+                        e.a.distance_override_m = km.filter(|v| *v > 0.0).map(|v| v * 1000.0);
+                    }
+                    ui.label(weak(
+                        ui,
+                        trf!(
+                            "relógio: {} · use o valor do painel da esteira",
+                            "watch: {} · use the treadmill display value",
+                            format::opt_km(a.distance_m)
+                        ),
+                    ));
+                });
+                ui.end_row();
+            }
+            ui.label(tr!("Observações", "Notes"));
+            let mut notes = e.a.notes.clone().unwrap_or_default();
+            if ui
+                .add(
+                    egui::TextEdit::multiline(&mut notes)
+                        .desired_rows(4)
+                        .desired_width(420.0)
+                        .hint_text(tr!(
+                            "Ex.: Estava muito calor. Dormi mal. Joguei tênis no dia anterior.",
+                            "E.g.: It was very hot. Slept badly. Played tennis the day before."
+                        )),
+                )
+                .changed()
+            {
+                e.a.notes = Some(notes).filter(|s| !s.trim().is_empty());
+            }
+            ui.end_row();
+            let scale = |ui: &mut Ui, v: &mut Option<i64>, max: i64| {
+                ui.horizontal(|ui| {
+                    if ui.selectable_label(v.is_none(), "—").clicked() {
+                        *v = None;
+                    }
+                    for i in 1..=max {
+                        if ui.selectable_label(*v == Some(i), i.to_string()).clicked() {
+                            *v = Some(i);
+                        }
+                    }
+                });
+            };
+            ui.label(tr!("Esforço percebido (RPE 1–10)", "Perceived effort (RPE 1–10)"));
+            scale(ui, &mut e.a.rpe, 10);
+            ui.end_row();
+            ui.label(tr!("Qualidade do sono (1–5)", "Sleep quality (1–5)"));
+            scale(ui, &mut e.a.sleep_quality, 5);
+            ui.end_row();
+            ui.label(tr!("Fadiga (1–5)", "Fatigue (1–5)"));
+            scale(ui, &mut e.a.fatigue, 5);
+            ui.end_row();
+            ui.label(tr!("Dor muscular (1–5)", "Muscle soreness (1–5)"));
+            scale(ui, &mut e.a.soreness, 5);
+            ui.end_row();
+            ui.label(tr!("Peso corporal (kg)", "Body weight (kg)"));
+            widgets::opt_number_edit(ui, &mut e.a.body_weight, &mut e.weight, 80.0);
+            ui.end_row();
+        });
     ui.add_space(8.0);
     if ui.button(RichText::new(tr!("💾 Salvar", "💾 Save")).strong()).clicked() {
         save = true;
@@ -857,14 +1035,26 @@ fn notes_tab(app: &mut App, ui: &mut Ui, a: &Activity) {
     if a.modality.is_run() {
         widgets::section(ui, tr!("Teste de referência", "Reference test"));
         if tests.is_empty() {
-            ui.label(weak(ui, tr!(
-                "Nenhum teste criado. Crie em Análises → Testes de referência.",
-                "No test created yet. Create one in Analysis → Reference tests."
-            )));
+            ui.label(weak(
+                ui,
+                tr!(
+                    "Nenhum teste criado. Crie em Análises → Testes de referência.",
+                    "No test created yet. Create one in Analysis → Reference tests."
+                ),
+            ));
         }
         for (tid, name, on) in &tests {
             let mut v = *on;
-            if ui.checkbox(&mut v, trf!("Esta corrida é uma execução de \"{name}\"", "This run is an execution of \"{name}\"")).changed() {
+            if ui
+                .checkbox(
+                    &mut v,
+                    trf!(
+                        "Esta corrida é uma execução de \"{name}\"",
+                        "This run is an execution of \"{name}\""
+                    ),
+                )
+                .changed()
+            {
                 if let Err(err) = app.db.set_reference_run(*tid, a.id, v) {
                     app.toast_error(err.to_string());
                 }
@@ -900,22 +1090,120 @@ fn quality_tab(ui: &mut Ui, m: &Metrics) {
         ),
     ));
     ui.add_space(6.0);
-    egui::Grid::new("quality").striped(true).min_col_width(200.0).show(ui, |ui| {
-        let rows = [
-            (tr!("Frequência cardíaca (zero, absurda ou pico isolado)", "Heart rate (zero, absurd or isolated spike)"), q.hr),
-            (tr!("Velocidade impossível / pace instantâneo anormal", "Impossible speed / abnormal instant pace"), q.speed),
-            (tr!("Saltos de GPS", "GPS jumps"), q.gps),
-            (tr!("Cadência isolada incorreta", "Isolated wrong cadence"), q.cadence),
-            (tr!("Distância voltando para trás", "Distance going backwards"), q.distance),
-        ];
-        for (label, n) in rows {
-            ui.label(label);
-            ui.label(RichText::new(n.to_string()).color(if n == 0 { widgets::GOOD } else { widgets::WARN }));
-            ui.end_row();
-        }
-    });
+    egui::Grid::new("quality")
+        .striped(true)
+        .min_col_width(200.0)
+        .show(ui, |ui| {
+            let rows = [
+                (
+                    tr!(
+                        "Frequência cardíaca (zero, absurda ou pico isolado)",
+                        "Heart rate (zero, absurd or isolated spike)"
+                    ),
+                    q.hr,
+                ),
+                (
+                    tr!(
+                        "Velocidade impossível / pace instantâneo anormal",
+                        "Impossible speed / abnormal instant pace"
+                    ),
+                    q.speed,
+                ),
+                (tr!("Saltos de GPS", "GPS jumps"), q.gps),
+                (tr!("Cadência isolada incorreta", "Isolated wrong cadence"), q.cadence),
+                (
+                    tr!("Distância voltando para trás", "Distance going backwards"),
+                    q.distance,
+                ),
+            ];
+            for (label, n) in rows {
+                ui.label(label);
+                ui.label(RichText::new(n.to_string()).color(if n == 0 { widgets::GOOD } else { widgets::WARN }));
+                ui.end_row();
+            }
+        });
     if q.total() == 0 {
         ui.add_space(6.0);
-        widgets::note(ui, tr!("Nenhuma leitura suspeita encontrada.", "No suspicious readings found."), widgets::GOOD);
+        widgets::note(
+            ui,
+            tr!("Nenhuma leitura suspeita encontrada.", "No suspicious readings found."),
+            widgets::GOOD,
+        );
+    }
+}
+
+fn file_section(app: &mut App, ui: &mut Ui, a: &Activity) {
+    widgets::section(ui, tr!("Detalhes do registro", "Record details"));
+    let opt = |v: Option<f64>, unit: &str| {
+        v.map(|v| format!("{} {unit}", format::num_trim(v, 1)))
+            .unwrap_or_else(format::dash)
+    };
+    egui::Grid::new("file-details")
+        .striped(true)
+        .min_col_width(200.0)
+        .show(ui, |ui| {
+            let mut row = |k: &str, v: String| {
+                ui.label(weak(ui, k));
+                ui.label(v);
+                ui.end_row();
+            };
+            row(
+                tr!("Origem", "Source"),
+                if a.source == "fit" {
+                    tr!("arquivo FIT", "FIT file").into()
+                } else {
+                    tr!("cadastro manual", "manual entry").into()
+                },
+            );
+            if let (Some(s), sub) = (a.fit_sport, a.fit_sub_sport) {
+                row(
+                    tr!("Esporte no FIT (sport/sub_sport)", "FIT sport (sport/sub_sport)"),
+                    format!("{s} / {}", sub.map(|v| v.to_string()).unwrap_or_else(format::dash)),
+                );
+            }
+            row(tr!("FC mínima", "Min HR"), format::bpm(a.min_hr));
+            row(
+                tr!("Velocidade máxima", "Max speed"),
+                a.max_speed
+                    .map(|v| format!("{} km/h", format::num(v * 3.6, 1)))
+                    .unwrap_or_else(format::dash),
+            );
+            row(
+                tr!("Altitude mín / máx", "Min / max altitude"),
+                format!("{} / {}", opt(a.min_alt, "m"), opt(a.max_alt, "m")),
+            );
+            row(
+                tr!("Temperatura média / máx", "Avg / max temperature"),
+                format!("{} / {}", opt(a.avg_temp, "°C"), opt(a.max_temp, "°C")),
+            );
+        });
+    if let Some(fid) = a.fit_file_id
+        && let Ok((name, bytes)) = app.db.fit_file_content(fid)
+    {
+        ui.add_space(6.0);
+        ui.horizontal(|ui| {
+            ui.label(weak(
+                ui,
+                trf!(
+                    "Arquivo original: {} ({} KB, guardado no banco)",
+                    "Original file: {} ({} KB, kept in the database)",
+                    name,
+                    bytes.len() / 1024
+                ),
+            ));
+            if ui
+                .button(tr!("⬇ Salvar cópia do FIT", "⬇ Save a copy of the FIT"))
+                .clicked()
+                && let Some(dest) = rfd::FileDialog::new()
+                    .set_file_name(&name)
+                    .add_filter("FIT", &["fit"])
+                    .save_file()
+            {
+                match std::fs::write(&dest, &bytes) {
+                    Ok(()) => app.toast(tr!("Arquivo salvo.", "File saved.")),
+                    Err(e) => app.toast_error(e.to_string()),
+                }
+            }
+        });
     }
 }

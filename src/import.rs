@@ -31,13 +31,13 @@ pub struct Report {
 
 impl Report {
     pub fn summary(&self) -> String {
-        let mut parts = vec![trf!(
-            "{} nova(s)",
-            "{} new",
-            self.imported.len()
-        )];
+        let mut parts = vec![trf!("{} nova(s)", "{} new", self.imported.len())];
         if self.skipped + self.same_activity.len() > 0 {
-            parts.push(trf!("{} já existente(s)", "{} already there", self.skipped + self.same_activity.len()));
+            parts.push(trf!(
+                "{} já existente(s)",
+                "{} already there",
+                self.skipped + self.same_activity.len()
+            ));
         }
         if !self.errors.is_empty() {
             parts.push(trf!("{} com erro", "{} with errors", self.errors.len()));
@@ -55,7 +55,9 @@ impl KnownErrors {
     const KEY: &'static str = "import_errors";
 
     pub fn load(db: &Db) -> Self {
-        db.get_kv(Self::KEY).and_then(|s| serde_json::from_str(&s).ok()).unwrap_or_default()
+        db.get_kv(Self::KEY)
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
     }
 
     pub fn save(&self, db: &Db) {
@@ -86,13 +88,19 @@ pub fn scan(dir: &Path) -> Vec<PathBuf> {
 }
 
 fn display_name(p: &Path) -> String {
-    p.file_name().map(|n| n.to_string_lossy().into_owned()).unwrap_or_default()
+    p.file_name()
+        .map(|n| n.to_string_lossy().into_owned())
+        .unwrap_or_default()
 }
 
 fn read_file(p: &Path) -> Result<Vec<u8>, String> {
     let meta = std::fs::metadata(p).map_err(|e| e.to_string())?;
     if meta.len() > MAX_FILE_SIZE {
-        return Err(tr!("arquivo grande demais para ser uma atividade", "file too large to be an activity").into());
+        return Err(tr!(
+            "arquivo grande demais para ser uma atividade",
+            "file too large to be an activity"
+        )
+        .into());
     }
     std::fs::read(p).map_err(|e| e.to_string())
 }
@@ -124,7 +132,9 @@ pub fn import_bytes(db: &mut Db, name: &str, bytes: &[u8]) -> Result<Outcome, St
     if let Some(existing) = db.find_same_activity(&parsed).map_err(|e| e.to_string())? {
         return Ok(Outcome::SameActivity(existing));
     }
-    let id = db.insert_fit_activity(&hash, name, bytes, &parsed, None).map_err(|e| e.to_string())?;
+    let id = db
+        .insert_fit_activity(&hash, name, bytes, &parsed, None)
+        .map_err(|e| e.to_string())?;
     let settings = db.load_settings();
     let observed = db.observed_max_hr();
     if let Ok(Some(a)) = db.activity(id) {
@@ -148,10 +158,10 @@ pub fn import_files(
         progress(i, paths.len(), &name);
         let result = read_file(p).and_then(|bytes| {
             let r = import_bytes(db, &name, &bytes);
-            if let (Err(e), true) = (&r, remember_errors) {
-                if let Some(h) = crate::hash::sha256_hex(&bytes) {
-                    known_errors.0.insert(h, (name.clone(), e.clone()));
-                }
+            if let (Err(e), true) = (&r, remember_errors)
+                && let Some(h) = crate::hash::sha256_hex(&bytes)
+            {
+                known_errors.0.insert(h, (name.clone(), e.clone()));
             }
             r
         });
@@ -201,7 +211,11 @@ mod tests {
         let r = import_files(&mut db, &files, true, &mut |_, _, _| {});
         assert_eq!(r.imported.len(), 2, "{r:?}");
         assert_eq!(r.errors.len(), 1);
-        assert!(r.errors[0].1.contains("trunc") || r.errors[0].1.contains("incomplet"), "{:?}", r.errors);
+        assert!(
+            r.errors[0].1.contains("trunc") || r.errors[0].1.contains("incomplet"),
+            "{:?}",
+            r.errors
+        );
 
         // nothing pending anymore: broken file is remembered, good ones imported
         assert!(pending(&db, &files).is_empty());
@@ -228,11 +242,17 @@ mod tests {
     fn re_exported_workout_is_detected() {
         let mut db = Db::open_in_memory().unwrap();
         let a = Synthetic::run(1_100_000_000, 900, 2.78, 150.0, 165.0, true);
-        assert!(matches!(import_bytes(&mut db, "x.fit", &a.encode()).unwrap(), Outcome::Imported(_)));
+        assert!(matches!(
+            import_bytes(&mut db, "x.fit", &a.encode()).unwrap(),
+            Outcome::Imported(_)
+        ));
         // same device + creation time but different bytes (e.g. other export tool)
         let mut b = Synthetic::run(1_100_000_000, 900, 2.78, 150.0, 166.0, true);
         b.serial = a.serial;
-        assert!(matches!(import_bytes(&mut db, "y.fit", &b.encode()).unwrap(), Outcome::SameActivity(_)));
+        assert!(matches!(
+            import_bytes(&mut db, "y.fit", &b.encode()).unwrap(),
+            Outcome::SameActivity(_)
+        ));
         assert_eq!(db.activities().unwrap().len(), 1);
     }
 
@@ -263,7 +283,9 @@ mod tests {
                 a.avg_cadence,
                 a.pace_s_per_km().map(crate::format::pace),
                 m.load,
-                m.drift.as_ref().map(|d| (d.hr1.round(), d.hr2.round(), d.decoupling_pct)),
+                m.drift
+                    .as_ref()
+                    .map(|d| (d.hr1.round(), d.hr2.round(), d.decoupling_pct)),
                 m.quality,
                 m.pace_hr.len(),
                 m.km_hr

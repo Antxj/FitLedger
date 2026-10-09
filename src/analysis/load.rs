@@ -78,7 +78,11 @@ pub fn warnings(acts: &[Activity], metrics: &HashMap<i64, Metrics>, today: Naive
     let avg_prev = prev.iter().sum::<f64>() / 4.0;
     // compare the days elapsed this week with the same share of a normal week
     let elapsed = (today - ws).num_days() + 1;
-    if has_history && avg_prev > 0.0 && s.this_week > avg_prev * 1.3 && s.this_week > avg_prev * elapsed as f64 / 7.0 * 1.3 {
+    if has_history
+        && avg_prev > 0.0
+        && s.this_week > avg_prev * 1.3
+        && s.this_week > avg_prev * elapsed as f64 / 7.0 * 1.3
+    {
         out.push(trf!(
             "Volume desta semana está significativamente acima da sua média recente (carga {} contra média de {} nas 4 semanas anteriores).",
             "This week's volume is significantly above your recent average (load {} vs an average of {} in the previous 4 weeks).",
@@ -120,7 +124,11 @@ pub fn warnings(acts: &[Activity], metrics: &HashMap<i64, Metrics>, today: Naive
 /// Days in a row (ending today or yesterday) with at least one activity.
 pub fn consecutive_days(acts: &[Activity], today: NaiveDate) -> i64 {
     let days: std::collections::BTreeSet<NaiveDate> = acts.iter().map(day_of).collect();
-    let mut d = if days.contains(&today) { today } else { today - Duration::days(1) };
+    let mut d = if days.contains(&today) {
+        today
+    } else {
+        today - Duration::days(1)
+    };
     let mut n = 0;
     while days.contains(&d) {
         n += 1;
@@ -170,10 +178,13 @@ pub fn recovery(acts: &[Activity], metrics: &HashMap<i64, Metrics>, today: Naive
         })
         .count();
     if history_weeks < 2 {
-        why.push(tr!(
-            "pouco histórico nas últimas 4 semanas para comparar a carga",
-            "little history in the last 4 weeks to compare the load"
-        ).to_string());
+        why.push(
+            tr!(
+                "pouco histórico nas últimas 4 semanas para comparar a carga",
+                "little history in the last 4 weeks to compare the load"
+            )
+            .to_string(),
+        );
     }
     if let Some(r) = s.ratio.filter(|_| history_weeks >= 2) {
         why.push(trf!(
@@ -190,15 +201,25 @@ pub fn recovery(acts: &[Activity], metrics: &HashMap<i64, Metrics>, today: Naive
     }
     if last48 > daily_avg * 3.0 && last48 > 60.0 {
         points += 1;
-        why.push(trf!("carga das últimas 48 h: {}", "load of the last 48 h: {}", last48.round()));
+        why.push(trf!(
+            "carga das últimas 48 h: {}",
+            "load of the last 48 h: {}",
+            last48.round()
+        ));
     }
     if hard48 > 0 {
         points += 1;
-        why.push(trf!("{hard48} treino(s) intenso(s) nas últimas 48 h", "{hard48} hard session(s) in the last 48 h"));
+        why.push(trf!(
+            "{hard48} treino(s) intenso(s) nas últimas 48 h",
+            "{hard48} hard session(s) in the last 48 h"
+        ));
     }
     if streak >= 5 {
         points += 1;
-        why.push(trf!("{streak} dias seguidos treinando", "{streak} days in a row training"));
+        why.push(trf!(
+            "{streak} dias seguidos treinando",
+            "{streak} days in a row training"
+        ));
     }
     let class = match points {
         0 | 1 => Recovery::Recovered,
@@ -227,7 +248,11 @@ pub struct WeekSummary {
 pub fn week_summary(acts: &[Activity], metrics: &HashMap<i64, Metrics>, start: NaiveDate) -> WeekSummary {
     let end = start + Duration::days(7);
     let week: Vec<&Activity> = acts.iter().filter(|a| (start..end).contains(&day_of(a))).collect();
-    let mut s = WeekSummary { start: Some(start), activities: week.len(), ..Default::default() };
+    let mut s = WeekSummary {
+        start: Some(start),
+        activities: week.len(),
+        ..Default::default()
+    };
     let mut runs = Vec::new();
     for a in &week {
         s.total_s += a.duration().unwrap_or(0.0);
@@ -263,7 +288,11 @@ pub fn week_summary(acts: &[Activity], metrics: &HashMap<i64, Metrics>, start: N
 /// Load class of a week compared with the previous 4 weeks.
 pub fn load_class(week_load: f64, prev_avg: f64) -> &'static str {
     if prev_avg <= 0.0 {
-        return if week_load > 0.0 { tr!("Moderada", "Moderate") } else { tr!("Baixa", "Low") };
+        return if week_load > 0.0 {
+            tr!("Moderada", "Moderate")
+        } else {
+            tr!("Baixa", "Low")
+        };
     }
     let r = week_load / prev_avg;
     if r < 0.8 {
@@ -290,7 +319,11 @@ mod tests {
             distance_m: if m.is_run() { Some(8000.0) } else { None },
             ..Default::default()
         };
-        let mt = Metrics { load, hard_share: if hard { 0.5 } else { 0.0 }, ..Default::default() };
+        let mt = Metrics {
+            load,
+            hard_share: if hard { 0.5 } else { 0.0 },
+            ..Default::default()
+        };
         (a, mt)
     }
 
@@ -332,12 +365,24 @@ mod tests {
         for w in 1..=4 {
             for k in 0..3 {
                 id += 1;
-                list.push(act(id, week_start(today) - Duration::days(7 * w) + Duration::days(k * 2), Modality::RoadRun, 50.0, false));
+                list.push(act(
+                    id,
+                    week_start(today) - Duration::days(7 * w) + Duration::days(k * 2),
+                    Modality::RoadRun,
+                    50.0,
+                    false,
+                ));
             }
         }
         for k in 0..4 {
             id += 1;
-            list.push(act(id, week_start(today) + Duration::days(k), Modality::RoadRun, 80.0, false));
+            list.push(act(
+                id,
+                week_start(today) + Duration::days(k),
+                Modality::RoadRun,
+                80.0,
+                false,
+            ));
         }
         let (acts, m) = build(list);
         let w = warnings(&acts, &m, today);
@@ -365,7 +410,11 @@ mod tests {
     #[test]
     fn streak() {
         let today = d(2026, 10, 9);
-        let (acts, _) = build((0..7).map(|i| act(i, today - Duration::days(i), Modality::Tennis, 10.0, false)).collect());
+        let (acts, _) = build(
+            (0..7)
+                .map(|i| act(i, today - Duration::days(i), Modality::Tennis, 10.0, false))
+                .collect(),
+        );
         assert_eq!(consecutive_days(&acts, today), 7);
     }
 }

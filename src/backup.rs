@@ -9,7 +9,10 @@ use std::path::Path;
 pub const EXTENSION: &str = "fitledger";
 
 pub fn default_file_name() -> String {
-    format!("FitLedger-backup-{}.{EXTENSION}", chrono::Local::now().format("%Y-%m-%d-%H%M"))
+    format!(
+        "FitLedger-backup-{}.{EXTENSION}",
+        chrono::Local::now().format("%Y-%m-%d-%H%M")
+    )
 }
 
 pub fn create(db: &Db, dest: &Path) -> Result<(), String> {
@@ -32,13 +35,23 @@ pub struct BackupInfo {
 
 /// Opens the file read-only and checks that it is a valid FitLedger database.
 pub fn inspect(src: &Path) -> Result<BackupInfo, String> {
-    let invalid = || tr!("o arquivo não é um backup do FitLedger", "the file is not a FitLedger backup").to_string();
+    let invalid = || {
+        tr!(
+            "o arquivo não é um backup do FitLedger",
+            "the file is not a FitLedger backup"
+        )
+        .to_string()
+    };
     let conn = Connection::open_with_flags(src, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|_| invalid())?;
-    let check: String = conn.query_row("PRAGMA quick_check", [], |r| r.get(0)).map_err(|_| invalid())?;
+    let check: String = conn
+        .query_row("PRAGMA quick_check", [], |r| r.get(0))
+        .map_err(|_| invalid())?;
     if check != "ok" {
         return Err(tr!("o backup está corrompido", "the backup is corrupted").into());
     }
-    let schema_v: i64 = conn.pragma_query_value(None, "user_version", |r| r.get(0)).map_err(|_| invalid())?;
+    let schema_v: i64 = conn
+        .pragma_query_value(None, "user_version", |r| r.get(0))
+        .map_err(|_| invalid())?;
     if schema_v < 1 {
         return Err(invalid());
     }
@@ -75,7 +88,8 @@ pub fn restore(src: &Path, db_path: &Path, safety_dir: &Path) -> Result<(), Stri
     let _ = std::fs::remove_file(&tmp);
     {
         let from = Connection::open_with_flags(src, OpenFlags::SQLITE_OPEN_READ_ONLY).map_err(|e| e.to_string())?;
-        from.execute("VACUUM INTO ?1", [tmp.to_string_lossy()]).map_err(|e| e.to_string())?;
+        from.execute("VACUUM INTO ?1", [tmp.to_string_lossy()])
+            .map_err(|e| e.to_string())?;
     }
     for ext in ["db-wal", "db-shm"] {
         let _ = std::fs::remove_file(db_path.with_extension(ext));
@@ -101,7 +115,11 @@ mod tests {
             let mut db = Db::open(&db_path, None).unwrap();
             let fit = Synthetic::run(1_100_000_000, 900, 2.8, 150.0, 160.0, true).encode();
             crate::import::import_bytes(&mut db, "a.fit", &fit).unwrap();
-            db.save_settings(&Settings { age: Some(40), ..Default::default() }).unwrap();
+            db.save_settings(&Settings {
+                age: Some(40),
+                ..Default::default()
+            })
+            .unwrap();
             create(&db, &backup).unwrap();
             // changes after the backup are undone by the restore
             db.conn.execute("DELETE FROM activity", []).unwrap();
