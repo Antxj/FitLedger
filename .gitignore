@@ -18,3 +18,8 @@ __pycache__/
 
 # local tooling
 .claude/
+
+# executables copied for local use
+*.exe
+*.exe.antigo
+*.exe.novo
