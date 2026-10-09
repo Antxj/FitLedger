@@ -1,0 +1,20 @@
+# NEVER commit real activity files: they contain GPS tracks and health data
+fits/
+*.fit
+*.FIT
+
+# app data (portable database, backups, exports)
+data/
+*.db
+*.db-wal
+*.db-shm
+*.fitledger
+exports/
+
+# build artifacts
+target/
+dist/
+__pycache__/
+
+# local tooling
+.claude/
