@@ -1,0 +1,55 @@
+# Checks on every push and pull request: format, lint, tests, licenses and
+# advisories. Third-party actions are pinned by commit hash.
+
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: windows-2022
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Rust toolchain (GNU) and MinGW-w64
+        shell: pwsh
+        run: |
+          rustup toolchain install stable-x86_64-pc-windows-gnu --profile minimal --component rustfmt,clippy
+          rustup default stable-x86_64-pc-windows-gnu
+          # gcc (bundled SQLite) and windres (icon/manifest) come from MinGW-w64
+          if (-not (Get-Command windres -ErrorAction SilentlyContinue)) {
+            if (Test-Path C:\mingw64\bin\windres.exe) {
+              "C:\mingw64\bin" >> $env:GITHUB_PATH
+            } else {
+              C:\msys64\usr\bin\pacman.exe -S --noconfirm --needed `
+                mingw-w64-x86_64-gcc mingw-w64-x86_64-binutils
+              "C:\msys64\mingw64\bin" >> $env:GITHUB_PATH
+            }
+          }
+
+      - name: Format
+        run: cargo fmt --check
+
+      - name: Clippy
+        run: cargo clippy --locked --all-targets -- -D warnings
+
+      - name: Tests
+        run: cargo test --locked
+
+  deny:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+      - uses: EmbarkStudios/cargo-deny-action@3c6349835b2b7b196a839186cb8b78e02f7b5f25 # v2.1.1
+        with:
+          command: check advisories bans licenses sources

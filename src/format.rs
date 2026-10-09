@@ -214,6 +214,15 @@ pub fn month_name(month: u32) -> &'static str {
     }
 }
 
+/// "1 sessão" / "3 sessões".
+pub fn sessions(n: usize) -> String {
+    if n == 1 {
+        tr!("1 sessão", "1 session").into()
+    } else {
+        trf!("{n} sessões", "{n} sessions")
+    }
+}
+
 /// Signed percentage: "+8%" / "-3%".
 pub fn pct_signed(v: f64) -> String {
     format!("{}{}%", if v > 0.0 { "+" } else { "" }, num(v, 0))

@@ -36,12 +36,13 @@ O que isso muda no plano:
 | Gráficos | `egui_plot` | Hover com valores, zoom, eixos e cursor ligados entre os gráficos da mesma atividade. |
 | Tabelas e datas | `egui_extras` (TableBuilder e DatePicker) | Tabelas grandes com rolagem virtual e ordenação. |
 | Banco | SQLite com `rusqlite` (feature `bundled`) | Um arquivo só, transações, aguenta anos de dados. |
-| Leitura de FIT | `fitparser` | Já conhece o perfil FIT (nomes, escalas e unidades). Como guardamos o arquivo bruto, dá para trocar por um decodificador próprio no futuro sem perder nada. |
-| Deduplicação | `sha2` (SHA-256 do arquivo) + chave da atividade | Ver §4. |
+| Leitura de FIT | **Decodificador próprio** (`src/fit/`) | Sem dependência extra; confere o CRC, aceita arquivos encadeados e timestamps comprimidos, e nunca entra em pânico com arquivo corrompido. Lê só os campos que usamos; o arquivo bruto fica guardado. |
+| Deduplicação | SHA-256 pelo BCrypt do Windows + chave da atividade | Ver §4. |
 | Diálogos de arquivo | `rfd` | Para "Importar arquivos FIT", "Criar backup" etc. |
 | Datas | `chrono` | Guardamos em UTC e mostramos no fuso local. |
 | Exportação | `serde`/`serde_json` e `csv` | — |
-| Windows | `windows-sys` (mutex de instância única), `embed-resource` (ícone, versão, manifesto `asInvoker`) | — |
+| Windows | `windows-sys` (instância única, WinHTTP, BCrypt, WinVerifyTrust), `embed-resource` (ícone, versão, manifesto `asInvoker`) | — |
+| Atualização automática | Igual ao VPN: consulta `releases/latest` do GitHub uma vez por dia (pode desligar), baixa o `FitLedger.exe`, confere o SHA-256 publicado pelo GitHub (e o assinante, quando houver assinatura), troca o .exe e reabre | Pedido em 09/10/2026. É o único acesso à rede. |
 
 **Onde ficam os arquivos:**
 
@@ -49,7 +50,7 @@ O que isso muda no plano:
 - `<pasta do exe>\data\fitledger.db` guarda todos os dados do app (**modo portátil**, por sua escolha), junto com backups automáticos de antes das migrações.
   - O app confere ao abrir se consegue gravar na pasta. Se não conseguir (por exemplo, se estiver em `Program Files`), mostra uma mensagem clara e não abre.
   - Na primeira vez que o banco for criado, um aviso explica que apagar a pasta do app apaga o histórico, e recomenda usar "Criar backup".
-- Nada é enviado pela rede. **Sem telemetria.** O mapa do percurso é desenhado como uma linha, **sem baixar mapas**. Mapas da internet podem entrar depois, como opção que vem desligada.
+- Nenhum dado de treino sai do computador. **Sem telemetria.** O mapa do percurso é desenhado como uma linha, **sem baixar mapas**. O único acesso à rede é a verificação de atualização (desligável).
 
 **Idioma:** a interface sai em **pt-BR e inglês desde o início**.
 - Todos os textos ficam em `i18n.rs`, como uma chave com os dois idiomas.
@@ -189,6 +190,8 @@ Na **tela da atividade**, ficam no topo os cards de resumo e, embaixo, abas:
 ## 7. Etapas (na ordem de prioridade do item 41)
 
 Cada etapa termina com o app abrindo, testes passando e um commit.
+
+Estado em 09/10/2026: **etapas 0 a 13 implementadas**; da 14, o pipeline, o README, as capturas e as licenças estão prontos, e falta publicar o repositório e a primeira versão.
 
 | # | Etapa | Itens do pedido | Entrega verificável |
 |---|---|---|---|

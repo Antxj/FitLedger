@@ -128,7 +128,7 @@ fn weekly(app: &mut App, ui: &mut Ui, today: chrono::NaiveDate) {
             (tr!("Tênis", "Tennis").into(), format::hours_short(s.tennis_s), None),
             (
                 tr!("Musculação", "Strength").into(),
-                trf!("{} sessões", "{} sessions", s.strength_sessions),
+                format::sessions(s.strength_sessions),
                 None,
             ),
             (

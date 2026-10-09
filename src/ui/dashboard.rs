@@ -200,11 +200,7 @@ fn this_week(app: &mut App, ui: &mut Ui, today: chrono::NaiveDate) {
                     format!("{} km ({}×)", format::num(s.run_km, 1), s.run_count),
                 );
                 row(ui, tr!("Tênis", "Tennis"), format::hours_short(s.tennis_s));
-                row(
-                    ui,
-                    tr!("Musculação", "Strength"),
-                    trf!("{} sessões", "{} sessions", s.strength_sessions),
-                );
+                row(ui, tr!("Musculação", "Strength"), format::sessions(s.strength_sessions));
                 row(ui, tr!("Tempo total", "Total time"), format::hours_short(s.total_s));
                 row(
                     ui,

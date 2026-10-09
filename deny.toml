@@ -1,0 +1,36 @@
+# cargo deny check — licenses, advisories, bans and sources.
+# Only the Windows target is shipped.
+
+[graph]
+targets = ["x86_64-pc-windows-gnu", "x86_64-pc-windows-msvc"]
+all-features = false
+
+[advisories]
+version = 2
+yanked = "deny"
+
+[licenses]
+version = 2
+# all compatible with GPL-3.0-or-later
+allow = [
+    "GPL-3.0-or-later", # FitLedger itself
+    "MIT",
+    "Apache-2.0",
+    "BSD-2-Clause",
+    "BSD-3-Clause",
+    "ISC",
+    "Zlib",
+    "Unicode-3.0",
+    "BSL-1.0",
+    "OFL-1.1",
+    "Ubuntu-font-1.0",
+]
+confidence-threshold = 0.9
+
+[bans]
+multiple-versions = "allow"
+wildcards = "deny"
+
+[sources]
+unknown-registry = "deny"
+unknown-git = "deny"

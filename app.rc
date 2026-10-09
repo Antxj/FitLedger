@@ -1,0 +1,29 @@
+// FitLedger resources: icon, UAC manifest and version information.
+// Keep the version in sync with Cargo.toml (a test checks it).
+
+1 ICON "assets/icon.ico"
+
+// RT_MANIFEST (type 24), id 1 = CREATEPROCESS_MANIFEST_RESOURCE_ID
+1 24 "assets/app.manifest"
+
+1 VERSIONINFO
+FILEVERSION 0,1,0,0
+PRODUCTVERSION 0,1,0,0
+BEGIN
+  BLOCK "StringFileInfo"
+  BEGIN
+    BLOCK "040904B0"
+    BEGIN
+      VALUE "FileDescription", "FitLedger - local sports diary"
+      VALUE "FileVersion", "0.1.0"
+      VALUE "ProductName", "FitLedger"
+      VALUE "ProductVersion", "0.1.0"
+      VALUE "OriginalFilename", "FitLedger.exe"
+      VALUE "LegalCopyright", "GPL-3.0-or-later"
+    END
+  END
+  BLOCK "VarFileInfo"
+  BEGIN
+    VALUE "Translation", 0x0409, 0x04B0
+  END
+END

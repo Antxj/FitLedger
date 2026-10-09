@@ -111,7 +111,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ),
             (
                 tr!("Musculação", "Strength").into(),
-                trf!("{} sessões", "{} sessions", totals.strength_sessions),
+                format::sessions(totals.strength_sessions as usize),
                 None,
             ),
             (tr!("Carga", "Load").into(), format::int(totals.load), None),

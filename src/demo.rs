@@ -101,12 +101,12 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
     let exercises = db.exercises()?;
     let ex = |name: &str| exercises.iter().find(|e| e.name == name).map(|e| e.id).unwrap_or(0);
     let test = db.save_reference_test(&RefTest {
-        name: "5 km a 6:00/km".into(),
+        name: tr!("5 km a 6:00/km", "5 km at 6:00/km").into(),
         modality: Modality::Treadmill,
         distance_m: 5000.0,
         target_pace: Some(360.0),
         incline_pct: Some(1.0),
-        notes: "Esteira a 10,0 km/h".into(),
+        notes: tr!("Esteira a 10,0 km/h", "Treadmill at 10.0 km/h").into(),
         ..Default::default()
     })?;
     let mut serial = 1000u32;
@@ -138,7 +138,7 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
                 let groups = if wd == 0 {
                     vec![
                         SetGroup {
-                            exercise_id: ex("Supino"),
+                            exercise_id: ex(tr!("Supino", "Bench press")),
                             sets: 3,
                             reps: Some(10),
                             weight_kg: w(50.0, 2.5),
@@ -147,14 +147,14 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
                             ..Default::default()
                         },
                         SetGroup {
-                            exercise_id: ex("Remada"),
+                            exercise_id: ex(tr!("Remada", "Row")),
                             sets: 3,
                             reps: Some(12),
                             weight_kg: w(40.0, 2.5),
                             ..Default::default()
                         },
                         SetGroup {
-                            exercise_id: ex("Desenvolvimento"),
+                            exercise_id: ex(tr!("Desenvolvimento", "Shoulder press")),
                             sets: 3,
                             reps: Some(10),
                             weight_kg: w(14.0, 1.0),
@@ -164,7 +164,7 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
                 } else {
                     vec![
                         SetGroup {
-                            exercise_id: ex("Agachamento"),
+                            exercise_id: ex(tr!("Agachamento", "Squat")),
                             sets: 4,
                             reps: Some(8),
                             weight_kg: w(60.0, 5.0),
@@ -172,14 +172,14 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
                             ..Default::default()
                         },
                         SetGroup {
-                            exercise_id: ex("Leg press"),
+                            exercise_id: ex(tr!("Leg press", "Leg press")),
                             sets: 3,
                             reps: Some(12),
                             weight_kg: w(120.0, 10.0),
                             ..Default::default()
                         },
                         SetGroup {
-                            exercise_id: ex("Rosca"),
+                            exercise_id: ex(tr!("Rosca", "Biceps curl")),
                             sets: 3,
                             reps: Some(12),
                             weight_kg: w(10.0, 1.0),
@@ -221,7 +221,7 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
                     db.set_reference_run(test, id, true)?;
                     if let Ok(Some(mut a)) = db.activity(id) {
                         a.incline_pct = Some(1.0);
-                        a.name = Some("Teste 5 km".into());
+                        a.name = Some(tr!("Teste 5 km", "5 km test").into());
                         db.update_activity_user_fields(&a)?;
                     }
                 }
@@ -244,10 +244,10 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
                 if let Some(id) = import(db, "intervals.fit", &s)
                     && let Ok(Some(mut a)) = db.activity(id)
                 {
-                    a.name = Some("Intervalado 5 × 3 min".into());
+                    a.name = Some(tr!("Intervalado 5 × 3 min", "Intervals 5 × 3 min").into());
                     a.rpe = Some(8);
                     if week % 4 == 1 {
-                        a.notes = Some("Estava muito calor.".into());
+                        a.notes = Some(tr!("Estava muito calor.", "It was very hot.").into());
                     }
                     db.update_activity_user_fields(&a)?;
                 }
@@ -277,9 +277,9 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
                 if let Some(id) = import(db, "long.fit", &s)
                     && let Ok(Some(mut a)) = db.activity(id)
                 {
-                    a.name = Some("Longão".into());
+                    a.name = Some(tr!("Longão", "Long run").into());
                     if week % 5 == 2 {
-                        a.notes = Some("Joguei tênis no dia anterior.".into());
+                        a.notes = Some(tr!("Joguei tênis no dia anterior.", "Played tennis the day before.").into());
                         a.sleep_quality = Some(3);
                         a.fatigue = Some(3);
                     }
@@ -294,9 +294,13 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
     // plan, planned workouts for this week and the next one
     let ws = crate::analysis::load::week_start(today);
     let plan = db.save_plan(&Plan {
-        name: "Melhorar eficiência nos 5 km".into(),
-        goal: "Correr 5 km a 6:00/km com menor frequência cardíaca".into(),
-        objectives: "Correr 5 km a 6:00/km com menor frequência cardíaca\nAumentar corrida longa até 10 km\nManter tênis\nManter musculação".into(),
+        name: tr!("Melhorar eficiência nos 5 km", "Improve 5 km efficiency").into(),
+        goal: tr!("Correr 5 km a 6:00/km com menor frequência cardíaca", "Run 5 km at 6:00/km with a lower heart rate").into(),
+        objectives: tr!(
+            "Correr 5 km a 6:00/km com menor frequência cardíaca\nAumentar corrida longa até 10 km\nManter tênis\nManter musculação",
+            "Run 5 km at 6:00/km with a lower heart rate\nIncrease the long run up to 10 km\nKeep tennis\nKeep strength training"
+        )
+        .into(),
         start_date: Some(start),
         end_date: Some(ws + Duration::days(27)),
         sessions_per_week: Some(6),
@@ -390,7 +394,7 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
     let goals = [
         (
             GoalKind::Distance,
-            "Correr 100 km no mês",
+            tr!("Correr 100 km no mês", "Run 100 km a month"),
             GoalParams {
                 distance_m: Some(100_000.0),
                 period: GoalPeriod::Month,
@@ -399,7 +403,7 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
         ),
         (
             GoalKind::Frequency,
-            "Correr 3 vezes por semana",
+            tr!("Correr 3 vezes por semana", "Run 3 times a week"),
             GoalParams {
                 count: Some(3.0),
                 ..Default::default()
@@ -407,7 +411,7 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
         ),
         (
             GoalKind::Performance,
-            "5 km abaixo de 28 minutos",
+            tr!("5 km abaixo de 28 minutos", "5 km under 28 minutes"),
             GoalParams {
                 distance_m: Some(5000.0),
                 time_s: Some(28.0 * 60.0),
@@ -416,7 +420,10 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
         ),
         (
             GoalKind::HeartRate,
-            "5 km a 6:00/km com FC média abaixo de 165 bpm",
+            tr!(
+                "5 km a 6:00/km com FC média abaixo de 165 bpm",
+                "5 km at 6:00/km with avg HR below 165 bpm"
+            ),
             GoalParams {
                 distance_m: Some(5000.0),
                 pace: Some(360.0),
@@ -426,7 +433,7 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
         ),
         (
             GoalKind::Frequency,
-            "Musculação 3 vezes por semana",
+            tr!("Musculação 3 vezes por semana", "Strength 3 times a week"),
             GoalParams {
                 count: Some(3.0),
                 modality: Some("strength".into()),
@@ -435,7 +442,7 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
         ),
         (
             GoalKind::Hours,
-            "Jogar 4 horas de tênis no mês",
+            tr!("Jogar 4 horas de tênis no mês", "Play 4 hours of tennis a month"),
             GoalParams {
                 hours: Some(4.0),
                 modality: Some("tennis".into()),
@@ -454,7 +461,7 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
         })?;
     }
     let obj = db.save_objective(&Objective {
-        title: "Correr 10 km confortavelmente".into(),
+        title: tr!("Correr 10 km confortavelmente", "Run 10 km comfortably").into(),
         target_date: Some(today + Duration::days(90)),
         ..Default::default()
     })?;

@@ -410,15 +410,18 @@ impl SetGroup {
     }
 }
 
-pub const DEFAULT_EXERCISES: [(&str, &str); 7] = [
-    ("Supino", "Peito"),
-    ("Agachamento", "Pernas"),
-    ("Leg press", "Pernas"),
-    ("Remada", "Costas"),
-    ("Desenvolvimento", "Ombros"),
-    ("Rosca", "Bíceps"),
-    ("Tríceps", "Tríceps"),
-];
+/// Exercises created on first use, in the current language: (name, muscle group).
+pub fn default_exercises() -> [(&'static str, &'static str); 7] {
+    [
+        (tr!("Supino", "Bench press"), tr!("Peito", "Chest")),
+        (tr!("Agachamento", "Squat"), tr!("Pernas", "Legs")),
+        (tr!("Leg press", "Leg press"), tr!("Pernas", "Legs")),
+        (tr!("Remada", "Row"), tr!("Costas", "Back")),
+        (tr!("Desenvolvimento", "Shoulder press"), tr!("Ombros", "Shoulders")),
+        (tr!("Rosca", "Biceps curl"), tr!("Bíceps", "Biceps")),
+        (tr!("Tríceps", "Triceps"), tr!("Tríceps", "Triceps")),
+    ]
+}
 
 // ------------------------------------------------------------- persistence --
 
@@ -777,7 +780,7 @@ impl Db {
     pub fn ensure_default_exercises(&self) -> Result<()> {
         let n: i64 = self.conn.query_row("SELECT count(*) FROM exercise", [], |r| r.get(0))?;
         if n == 0 && self.get_kv("exercises_seeded").is_none() {
-            for (name, group) in DEFAULT_EXERCISES {
+            for (name, group) in default_exercises() {
                 self.conn.execute(
                     "INSERT OR IGNORE INTO exercise(name, muscle_group) VALUES(?1, ?2)",
                     params![name, group],
