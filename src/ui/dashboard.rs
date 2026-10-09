@@ -182,6 +182,7 @@ fn this_week(app: &mut App, ui: &mut Ui, today: chrono::NaiveDate) {
         .map(|k| load::week_summary(&app.data.activities, &app.data.metrics, ws - Duration::days(7 * k)).load)
         .sum::<f64>()
         / 4.0;
+    let mut open = None;
     widgets::card_frame(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.label(weak(ui, tr!("Semana atual (resumo)", "This week (summary)")).small());
@@ -225,7 +226,38 @@ fn this_week(app: &mut App, ui: &mut Ui, today: chrono::NaiveDate) {
                 };
                 row(ui, tr!("Vs. semana anterior (volume)", "Vs. last week (volume)"), cmp);
             });
+        // the workouts of the week
+        let mut week: Vec<_> = app
+            .data
+            .activities
+            .iter()
+            .filter(|a| (ws..ws + Duration::days(7)).contains(&day_of(a)))
+            .collect();
+        week.sort_by_key(|a| a.start_time);
+        if !week.is_empty() {
+            ui.add_space(4.0);
+            ui.label(weak(ui, tr!("Treinos da semana", "This week's workouts")).small());
+        }
+        for a in week {
+            ui.horizontal(|ui| {
+                ui.label(weak(ui, format::weekday_short(day_of(a))));
+                if ui
+                    .link(egui::RichText::new(a.title()).color(widgets::modality_color(a.modality)))
+                    .clicked()
+                {
+                    open = Some(a.id);
+                }
+                let mut parts = vec![format::opt_duration(a.duration())];
+                if a.distance().is_some() {
+                    parts.push(format::opt_km(a.distance()));
+                }
+                ui.label(weak(ui, parts.join(" · ")));
+            });
+        }
     });
+    if let Some(id) = open {
+        app.go(Page::Activity(id));
+    }
 }
 
 fn load_box(app: &mut App, ui: &mut Ui, today: chrono::NaiveDate) {

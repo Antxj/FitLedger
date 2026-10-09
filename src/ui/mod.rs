@@ -651,6 +651,7 @@ impl App {
             ("insights".into(), Page::Insights, None),
             ("settings".into(), Page::Settings, None),
             ("manual".into(), Page::Manual(None), None),
+            ("onboarding".into(), Page::Onboarding, None),
         ]);
         if let Ok(only) = std::env::var("FITLEDGER_SCREENSHOT_ONLY") {
             let keep: Vec<&str> = only.split(',').map(str::trim).collect();
