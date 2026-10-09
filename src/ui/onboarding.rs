@@ -49,16 +49,23 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 )));
                 ui.add_space(8.0);
                 egui::Grid::new("onb").num_columns(2).spacing([12.0, 8.0]).show(ui, |ui| {
-                    let field = |ui: &mut Ui, label: &str, buf: &mut String, hint: &str| {
+                    // the unit stays visible next to the field, also after typing
+                    let field = |ui: &mut Ui, label: &str, buf: &mut String, unit: &str, note: &str| {
                         ui.label(label);
-                        ui.add(egui::TextEdit::singleline(buf).hint_text(hint).desired_width(120.0));
+                        ui.horizontal(|ui| {
+                            ui.add(egui::TextEdit::singleline(buf).desired_width(80.0));
+                            ui.label(unit);
+                            if !note.is_empty() {
+                                ui.label(weak(ui, note).small());
+                            }
+                        });
                         ui.end_row();
                     };
-                    field(ui, tr!("Idade", "Age"), &mut s.age, tr!("anos", "years"));
-                    field(ui, tr!("Peso", "Weight"), &mut s.weight, "kg");
-                    field(ui, tr!("Altura", "Height"), &mut s.height, "cm");
-                    field(ui, tr!("FC máxima", "Max HR"), &mut s.hr_max, tr!("bpm (se souber)", "bpm (if known)"));
-                    field(ui, tr!("FC de repouso", "Resting HR"), &mut s.hr_rest, "bpm");
+                    field(ui, tr!("Idade", "Age"), &mut s.age, tr!("anos", "years"), "");
+                    field(ui, tr!("Peso", "Weight"), &mut s.weight, "kg", "");
+                    field(ui, tr!("Altura", "Height"), &mut s.height, "cm", "");
+                    field(ui, tr!("FC máxima", "Max HR"), &mut s.hr_max, "bpm", tr!("se souber", "if known"));
+                    field(ui, tr!("FC de repouso", "Resting HR"), &mut s.hr_rest, "bpm", "");
                 });
                 ui.add_space(10.0);
                 if ui.button(RichText::new(tr!("Continuar →", "Continue →")).strong()).clicked() {
