@@ -90,12 +90,13 @@ impl Zones {
 }
 
 impl Settings {
-    /// Max heart rate to use: typed > observed > 220 - age > 190.
+    /// Max heart rate to use: typed, else 208 − 0.7 × age (Tanaka 2001) or
+    /// 185, raised to the highest recorded value when that is higher.
     pub fn effective_hr_max(&self, observed_max: Option<f64>) -> f64 {
         if let Some(v) = self.hr_max.filter(|&v| v > 100.0) {
             return v;
         }
-        let by_age = self.age.map(|a| 220.0 - a as f64);
+        let by_age = self.age.map(|a| (208.0 - 0.7 * a as f64).round());
         // a beginner who only ran easily has never reached the real maximum:
         // the highest value seen only counts when it is above the estimate
         let estimate = by_age.unwrap_or(185.0);

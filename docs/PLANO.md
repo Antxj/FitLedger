@@ -40,7 +40,10 @@ O objetivo do usuário é:
   a queda da FC.
 - **Polimento:** −30% na última semana, com a tentativa da meta no dia do longão.
 - **Zonas:** pela FC de reserva (Karvonen) por padrão. Sem FC máxima informada, o app usa
-  220 − idade (ou 185), e só considera a maior FC registrada quando ela for maior que isso.
+  208 − 0,7 × idade (Tanaka, 2001), ou 185 sem idade, e só considera a maior FC registrada
+  quando ela for maior que isso.
+- **Base científica:** a lista completa de métodos e estudos fica em `src/coach/science.rs`.
+  Ela aparece no app (Plano → Base científica) e no README.
 
 ### Estimativa de quando a meta é viável
 

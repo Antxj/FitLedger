@@ -79,6 +79,23 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             ui.label(line);
         }
     });
+    egui::CollapsingHeader::new(tr!("Base científica", "Scientific basis")).show(ui, |ui| {
+        ui.label(weak(
+            ui,
+            tr!(
+                "Os métodos e estudos em que o treinador se apoia, e o que é regra própria do app. Orientação de treino, não é avaliação médica.",
+                "The methods and studies the coach relies on, and what is the app's own rule. Training guidance, not medical advice."
+            ),
+        ));
+        for b in crate::coach::science::BASIS {
+            ui.add_space(4.0);
+            ui.label(RichText::new(b.topic()).strong());
+            ui.label(b.usage());
+            if !b.reference.is_empty() {
+                ui.label(weak(ui, b.reference).small().italics());
+            }
+        }
+    });
     let log = app.db.coach_log(c.goal.id, 20).unwrap_or_default();
     if !log.is_empty() {
         egui::CollapsingHeader::new(trf!("Histórico de ajustes ({})", "Adjustment history ({})", log.len())).show(

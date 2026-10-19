@@ -14,6 +14,7 @@
 pub mod adapt;
 pub mod fitness;
 pub mod plan;
+pub mod science;
 pub mod store;
 
 use chrono::{Datelike, NaiveDate};

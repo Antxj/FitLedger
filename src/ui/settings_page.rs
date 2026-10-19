@@ -110,8 +110,8 @@ fn heart_rate(app: &mut App, ui: &mut Ui) {
                 ui.label(weak(
                     ui,
                     trf!(
-                        "em branco: usa a maior registrada ({}) ou 220 − idade",
-                        "blank: uses the highest recorded ({}) or 220 − age",
+                        "em branco: estima por 208 − 0,7 × idade, ou a maior registrada ({}) se for maior",
+                        "blank: estimated as 208 − 0.7 × age, or the highest recorded ({}) if higher",
                         format::bpm(observed)
                     ),
                 ));

@@ -38,6 +38,29 @@ schedule built for *you* — from the runs your watch already records.
 |---|---|---|
 | ![Plan](docs/en/plan.png) | ![Progress](docs/en/progress.png) | ![Run](docs/en/run-charts.png) |
 
+## The science behind the plan
+
+FitLedger's coach is built on well-established exercise science, applied conservatively:
+
+| What the coach does | Based on |
+|---|---|
+| Heart-rate zones from your heart-rate **reserve**; easy runs capped at the top of zone 2 | Karvonen, Kentala & Mustala, *Ann Med Exp Biol Fenn* 1957 |
+| Estimated maximum heart rate = 208 − 0.7 × age when you don't know yours | Tanaka, Monahan & Seals, *J Am Coll Cardiol* 2001 |
+| Most of the training at low intensity; at most one harder session a week | Seiler & Kjerland, *Scand J Med Sci Sports* 2006 |
+| Progress measured as **lower heart rate at the same pace** (progress checks + every run) | Buchheit, *Front Physiol* 2014 |
+| Cardiac drift (aerobic decoupling) to judge long runs | Coyle & González-Alonso, *Exerc Sport Sci Rev* 2001 |
+| Training load from duration and heart rate (TRIMP) | Banister, *Physiological Testing of the High-Performance Athlete* 1991 |
+| Finish-time prediction for the goal distance | Riegel, *American Scientist* 1981 |
+| Gradual weekly increases (big jumps raise injury risk in novice runners) | Nielsen et al., *JOSPT* 2014; Buist et al., *Am J Sports Med* 2008 |
+| Phases and a lighter week every fourth week | Issurin, *Sports Med* 2010 |
+
+Some numbers are FitLedger's own conservative choices rather than findings of a specific study:
+weekly time grows at most 8% and the long run about 10%; with no trend yet it assumes an
+improvement of 0.8% a week in time and 0.4 bpm a week in heart rate; it warns about drift above 8%
+or easy runs spending more than 30% of the time above zone 2. Your own data replaces these
+assumptions as you run. The full list, with complete references, is in the app under
+*Plan → Scientific basis*.
+
 ## Everything your runs can tell you
 
 - **Automatic import** of `.fit` files: drop them in the `fits` folder next to the app and they are
