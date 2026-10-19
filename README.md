@@ -3,79 +3,96 @@
 <h1 align="center">FitLedger</h1>
 
 <p align="center">
-A local sports diary for Windows: reads your watch's <code>.fit</code> files and turns them into
-analysis of runs, treadmill sessions, tennis and strength training — progress, goals and plans.
+<b>Your personal running coach for Windows.</b><br>
+Tell it your goal. It builds your training plan — and rebuilds it after every run you import.
 <br><br>
 <a href="https://github.com/Antxj/FitLedger/releases/latest"><b>⬇ Download FitLedger.exe</b></a>
-&nbsp;·&nbsp; <a href="README.pt-BR.md">Leia em português</a>
+&nbsp;·&nbsp; Free and open source &nbsp;·&nbsp; No account, no cloud, no subscription
 </p>
 
-![Dashboard](docs/en/dashboard.png)
+![Today](docs/en/today.png)
 
-## What it does
+## Run lower. Run longer. Run faster.
 
-- **Automatic FIT import.** Put `.fit` files in the `fits` folder next to `FitLedger.exe`; new
-  files are imported every time the app opens (or use *Import FIT files*). Duplicates are detected,
-  a broken file never stops the others, and the original files are never changed.
-- **Everything the watch recorded:** heart rate, pace, speed, cadence, altitude, GPS, power,
-  temperature, laps, pauses — plus the original file kept inside the database.
-- **Activity detail** with linked charts (hover to see values), splits per 500 m / 1 km / mile /
-  any distance, laps, heart-rate zones, cardiac drift, route and data-quality report.
-- **Pace × heart rate**: are you running faster at the same HR, or at the same pace with a lower HR?
-  Uses steady 1-minute stretches, grouped by pace band, over time.
-- **Cardiac drift (Pa:HR decoupling)** and **reference tests** (e.g. 5 km at 6:00/km on the
-  treadmill at 1%) with HR per km for each execution.
-- **Treadmill** kept apart from road running, with incline and corrected distance.
-- **Training load** (TRIMP from heart rate, or RPE × minutes), 7/28-day load, simple warnings and a
-  recovery estimate. Tennis counts: a hard match is not a rest day. *No medical diagnosis.*
-- **Plans and calendar**: weekly template, planned vs done, structured intervals with repeated
-  blocks and the treadmill speed for every target pace.
-- **Goals** (distance, frequency, time, HR at pace, longest distance, hours) and long-term
-  objectives with sub-goals.
-- **Strength training** (sets × reps × weight, history and volume per exercise) and a **tennis** area.
-- **Progress, records, weekly summary and insights** — each insight shows the data behind it.
-- **Comparisons** of two or more activities that warn about treadmill vs road, terrain, distance
-  and temperature differences.
-- **Backup/restore** (one `.fitledger` file), **CSV/JSON export**, Portuguese and English, light
-  and dark themes.
+Whether you want to **run 5 km for the first time**, **finish 10 km in under an hour**, or
+**run at the same pace with a lower heart rate**, FitLedger turns that goal into a week-by-week
+schedule built for *you* — from the runs your watch already records.
 
-| Pace × HR | Calendar | Activity |
+- **Set a goal in seconds.** Distance, and optionally a finish time, a maximum average heart rate,
+  how many days a week you run, which days, and a target date. Change it anytime: the plan
+  adjusts instantly and your history stays.
+- **A plan that listens.** Import a run and the coach compares it with what was planned. Missed a
+  session? Nothing is "made up". Easy runs too hard? Volume grows more slowly. Long run with high
+  cardiac drift? It waits before getting longer. Logged high fatigue? The week gets lighter.
+  Every change comes with the data that triggered it.
+- **Heart-rate first.** Easy runs have a clear heart-rate cap from *your* zones, and every session
+  shows the pace range **and the matching treadmill speed** — road or treadmill, you know exactly
+  what to do.
+- **Honest progress.** FitLedger models how your heart rate rises with speed, so it can tell you
+  your estimated heart rate at goal pace, how fast it is dropping, your predicted finish time and
+  a conservative estimate of when the goal is within reach.
+- **Progress checks built in.** Every few weeks the plan includes a short check at goal pace —
+  ideally on the treadmill, for identical conditions — so improvements are measured, not guessed.
+
+| The plan | Goal progress | Every run, in detail |
 |---|---|---|
-| ![Analysis](docs/en/analysis.png) | ![Calendar](docs/en/calendar.png) | ![Charts](docs/en/activity-charts.png) |
-| **Goals** | **Strength** | **Insights** |
-| ![Goals](docs/en/goals.png) | ![Strength](docs/en/strength.png) | ![Insights](docs/en/insights.png) |
+| ![Plan](docs/en/plan.png) | ![Progress](docs/en/progress.png) | ![Run](docs/en/run-charts.png) |
 
-*Screenshots use made-up demo data.*
+## Everything your runs can tell you
+
+- **Automatic import** of `.fit` files: drop them in the `fits` folder next to the app and they are
+  imported every time it opens. Duplicates are detected, broken files never stop the others, and
+  your original files are never modified.
+- **Detailed runs:** linked charts of heart rate, pace, speed, cadence, altitude and power (hover
+  to read any value), splits by 500 m / 1 km / mile / any distance, laps, heart-rate zones,
+  cardiac drift, the route and a data-quality report that flags bad sensor readings without
+  deleting anything.
+- **Analysis:** goal progress, weekly volume and plan adherence, pace × heart rate over time,
+  cardiac drift trend, personal records (road and treadmill kept apart), zones and a
+  pace ↔ km/h converter.
+- **Comparisons** of two or more runs, with warnings when conditions differ (treadmill vs road,
+  hills, distance, temperature).
+- **Reports:** a polished HTML report for any period — goal, projection, charts, adherence and every
+  run — ready to print to PDF, plus **CSV and JSON** exports of runs, the plan and weekly totals.
+
+![Reports](docs/en/reports.png)
+
+## Private by design
+
+- Everything stays on your computer. **No telemetry, no account, no cloud.**
+- Routes are drawn from your GPS points without downloading any map.
+- The only network request is the update check: when the app opens (and once a day after that) it
+  asks GitHub whether a new version exists. You can turn it off in *Settings*. Updates are only
+  installed when you click, after the file's SHA-256 is verified.
+- Portable: the app and your data live in one folder you control. Make a backup with one click.
 
 ## Getting started
 
 1. Download `FitLedger.exe` from the [latest release](https://github.com/Antxj/FitLedger/releases/latest)
-   and put it in a folder of its own where you can write files (e.g. `Documents\FitLedger`) —
-   not in `Program Files`.
-2. Open it. It creates two folders next to the executable:
-   - `fits\` — copy your `.fit` files here (Garmin, Coros, Zepp/Amazfit, Suunto, Polar exports…);
-   - `data\` — your history (`fitledger.db`) and automatic backups.
-3. **Deleting the app folder deletes your history.** Use *Settings → Create backup* now and then.
+   and put it in a folder of its own where you can write files (for example `Documents\FitLedger`).
+2. Open it. A short setup asks for your age and heart rate (for your zones), imports your runs
+   and helps you set your first goal.
+3. After each run, copy the `.fit` file from your watch app into the `fits` folder (or use
+   *Import FIT files*). The plan updates itself.
 
-The release is not code-signed yet, so Windows SmartScreen may warn the first time
-(*More info → Run anyway*). You can check the file against the SHA-256 in the release notes, or
-verify where it was built:
+Works with `.fit` files from Garmin, Coros, Zepp/Amazfit, Suunto and other watches that export FIT.
+English and Portuguese (detected automatically), light and dark themes (follows Windows).
+
+The executable is not code-signed yet, so Windows SmartScreen may show a warning the first time
+(*More info → Run anyway*). Each release lists the file's SHA-256, and you can verify where it was
+built:
 
 ```bash
 gh attestation verify FitLedger.exe --repo Antxj/FitLedger
 ```
 
-## Privacy
+> FitLedger gives training guidance based on your recorded runs. It is not medical advice —
+> check with a doctor before starting a new training program.
 
-- Everything stays on your computer. **No telemetry, no account, no cloud.**
-- The only network access is the update check: once a day the app asks the public GitHub API for
-  the latest release (you can turn it off in *Settings*). Updates are only installed when you click,
-  after the SHA-256 published by GitHub is checked.
-- Routes are drawn from your GPS points without downloading any map.
+## For developers
 
-## Building
-
-Requirements: Rust (stable, GNU toolchain) and MinGW-w64 (`gcc` and `windres`, e.g. from MSYS2).
+Built in Rust with [egui](https://github.com/emilk/egui) and SQLite; a single portable executable.
+Requirements: Rust (stable, GNU toolchain) and MinGW-w64 (`gcc`, `windres`).
 
 ```bash
 cargo test
@@ -85,13 +102,11 @@ cargo test
 powershell -ExecutionPolicy Bypass -File build-release.ps1
 ```
 
-`build-release.ps1` runs the tests, builds `target\release\fitledger.exe` without local paths
-inside the binary, checks it and prints its SHA-256 — the same script runs on GitHub Actions.
-Useful environment variables for development: `FITLEDGER_HOME` (base folder instead of the exe
-folder), `FITLEDGER_DEMO=1` with `FITLEDGER_SCREENSHOTS=<folder>` (fake data and screenshots,
-see `tools/screenshots.py`), `FITLEDGER_LANGUAGE=pt|en`.
+`build-release.ps1` runs the tests, builds the executable without local paths inside, checks it and
+prints its SHA-256 — the same script GitHub Actions uses for releases. `tools/screenshots.py`
+regenerates the screenshots from made-up demo data (`FITLEDGER_DEMO=1`).
 
 ## License
 
-GPL-3.0-or-later — see [LICENSE](LICENSE). Third-party components: [THIRD-PARTY-LICENSES.txt](THIRD-PARTY-LICENSES.txt).
-Security issues: see [SECURITY.md](SECURITY.md).
+GPL-3.0-or-later — see [LICENSE](LICENSE). Third-party components:
+[THIRD-PARTY-LICENSES.txt](THIRD-PARTY-LICENSES.txt). Security reports: [SECURITY.md](SECURITY.md).

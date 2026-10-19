@@ -1,9 +1,9 @@
 [package]
 name = "fitledger"
-version = "0.1.0"
+version = "0.2.0"
 edition = "2024"
 rust-version = "1.95"
-description = "Local desktop sports diary: FIT import, running analysis, training plans and goals"
+description = "A running coach for Windows that builds and adapts your training plan from your watch's FIT files"
 license = "GPL-3.0-or-later"
 repository = "https://github.com/Antxj/FitLedger"
 

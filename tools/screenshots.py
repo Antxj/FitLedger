@@ -1,8 +1,7 @@
 """Documentation screenshots with FAKE data (never your real activities).
 
 Runs the app in screenshot mode (FITLEDGER_DEMO + FITLEDGER_SCREENSHOTS) in a
-temporary folder, in Portuguese and English, and saves compressed PNGs to
-docs/pt-BR and docs/en. Requires: pip install pillow
+temporary folder, in English, and saves compressed PNGs to docs/en. Requires: pip install pillow
 
     cargo build --release
     python tools/screenshots.py target/release/fitledger.exe
@@ -17,12 +16,13 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-SHOTS = ["dashboard", "activity-charts", "activity-splits", "analysis", "calendar", "goals", "strength", "tennis", "insights"]
+SHOTS = ["today", "plan", "goal", "progress", "run-charts", "runs", "reports"]
 
 
 def main():
     exe = Path(sys.argv[1] if len(sys.argv) > 1 else ROOT / "target" / "release" / "fitledger.exe").resolve()
-    for lang, folder in (("pt", "pt-BR"), ("en", "en")):
+    # the README is in English only
+    for lang, folder in (("en", "en"),):
         with tempfile.TemporaryDirectory() as tmp:
             home = Path(tmp) / "home"
             shots = Path(tmp) / "shots"

@@ -7,17 +7,17 @@
 1 24 "assets/app.manifest"
 
 1 VERSIONINFO
-FILEVERSION 0,1,0,0
-PRODUCTVERSION 0,1,0,0
+FILEVERSION 0,2,0,0
+PRODUCTVERSION 0,2,0,0
 BEGIN
   BLOCK "StringFileInfo"
   BEGIN
     BLOCK "040904B0"
     BEGIN
-      VALUE "FileDescription", "FitLedger - local sports diary"
-      VALUE "FileVersion", "0.1.0"
+      VALUE "FileDescription", "FitLedger - running coach"
+      VALUE "FileVersion", "0.2.0"
       VALUE "ProductName", "FitLedger"
-      VALUE "ProductVersion", "0.1.0"
+      VALUE "ProductVersion", "0.2.0"
       VALUE "OriginalFilename", "FitLedger.exe"
       VALUE "LegalCopyright", "GPL-3.0-or-later"
     END
