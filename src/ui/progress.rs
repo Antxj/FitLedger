@@ -1,26 +1,27 @@
-//! Analysis page: pace × HR (item 8), cardiac drift over time (item 9),
-//! reference tests (item 10), pace ↔ speed converter (item 11) and the
-//! heart-rate area (item 7).
+//! Analysis: progress toward the goal, weekly volume, pace × HR, cardiac
+//! drift, records, heart-rate zones and the pace ↔ speed converter.
 
 use super::charts::{self, Axis, ChartOpts, Series};
 use super::widgets::{self, weak};
 use super::{App, Page};
-use crate::analysis::load::day_of;
+use crate::analysis::splits::{MILE_M, RECORD_DISTANCES};
 use crate::analysis::trends::{self, PACE_BIN};
+use crate::coach::fitness::day as day_of;
 use crate::format;
 use crate::model::{Activity, Modality};
-use crate::planning::RefTest;
 use eframe::egui::{self, RichText, Ui};
 use egui_extras::{Column, TableBuilder};
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
 pub enum Tab {
     #[default]
+    Goal,
+    Volume,
     PaceHr,
     Drift,
-    Tests,
-    Converter,
+    Records,
     HeartRate,
+    Converter,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Default)]
@@ -49,16 +50,6 @@ pub struct State {
     pace: Option<f64>,
     conv_pace: String,
     conv_kmh: String,
-    test_edit: Option<TestEdit>,
-    test_selected: Option<i64>,
-    add_run: Option<i64>,
-}
-
-struct TestEdit {
-    t: RefTest,
-    distance: String,
-    pace: String,
-    incline: String,
 }
 
 fn filter_ui(ui: &mut Ui, f: &mut RunFilter) {
@@ -72,28 +63,32 @@ fn filter_ui(ui: &mut Ui, f: &mut RunFilter) {
 
 pub fn show(app: &mut App, ui: &mut Ui) {
     widgets::page_title(ui, tr!("Análises", "Analysis"));
-    ui.horizontal(|ui| {
-        let t = &mut app.pages.analysis.tab;
+    ui.horizontal_wrapped(|ui| {
+        let t = &mut app.pages.progress.tab;
+        ui.selectable_value(t, Tab::Goal, tr!("Evolução da meta", "Goal progress"));
+        ui.selectable_value(t, Tab::Volume, tr!("Volume", "Volume"));
         ui.selectable_value(t, Tab::PaceHr, tr!("Pace × FC", "Pace × HR"));
         ui.selectable_value(t, Tab::Drift, tr!("Deriva cardíaca", "Cardiac drift"));
-        ui.selectable_value(t, Tab::Tests, tr!("Testes de referência", "Reference tests"));
-        ui.selectable_value(t, Tab::HeartRate, tr!("Frequência cardíaca", "Heart rate"));
+        ui.selectable_value(t, Tab::Records, tr!("Records", "Records"));
+        ui.selectable_value(t, Tab::HeartRate, tr!("Zonas de FC", "HR zones"));
         ui.selectable_value(t, Tab::Converter, tr!("Conversor pace ↔ km/h", "Pace ↔ km/h converter"));
     });
     ui.separator();
     egui::ScrollArea::vertical()
         .auto_shrink(false)
-        .show(ui, |ui| match app.pages.analysis.tab {
+        .show(ui, |ui| match app.pages.progress.tab {
+            Tab::Goal => goal(app, ui),
+            Tab::Volume => volume(app, ui),
             Tab::PaceHr => pace_hr(app, ui),
             Tab::Drift => drift(app, ui),
-            Tab::Tests => tests(app, ui),
+            Tab::Records => records(app, ui),
             Tab::Converter => converter(app, ui),
             Tab::HeartRate => heart_rate(app, ui),
         });
 }
 
 fn pace_hr(app: &mut App, ui: &mut Ui) {
-    let s = &mut app.pages.analysis;
+    let s = &mut app.pages.progress;
     ui.label(weak(ui, tr!(
         "Mostra se você está correndo mais rápido com a mesma FC, ou no mesmo ritmo com FC menor. Usa trechos estáveis de 1 minuto (pace com variação abaixo de 5%, depois dos 3 primeiros minutos), além da média de cada corrida.",
         "Shows whether you run faster at the same HR, or at the same pace with a lower HR. Uses steady 1-minute stretches (pace varying less than 5%, after the first 3 minutes), plus each run's average."
@@ -294,7 +289,7 @@ fn pace_hr(app: &mut App, ui: &mut Ui) {
 }
 
 fn drift(app: &mut App, ui: &mut Ui) {
-    let s = &mut app.pages.analysis;
+    let s = &mut app.pages.progress;
     ui.label(weak(ui, tr!(
         "Desacoplamento Pa:FC de cada corrida (≥ 10 min): quanto a relação velocidade/FC piorou da 1ª para a 2ª metade. Abaixo de ~5% indica boa eficiência aeróbica naquele ritmo.",
         "Pa:HR decoupling of each run (≥ 10 min): how much the speed/HR ratio worsened from the 1st to the 2nd half. Below ~5% indicates good aerobic efficiency at that pace."
@@ -404,319 +399,8 @@ fn drift(app: &mut App, ui: &mut Ui) {
     }
 }
 
-fn tests(app: &mut App, ui: &mut Ui) {
-    let tests = app.db.reference_tests().unwrap_or_default();
-    ui.label(weak(ui, tr!(
-        "Um teste de referência é sempre feito nas mesmas condições (ex.: 5 km a 6:00/km na esteira a 10 km/h, 1% de inclinação). Comparando as execuções, a queda da FC mostra a evolução do condicionamento.",
-        "A reference test is always done under the same conditions (e.g. 5 km at 6:00/km on the treadmill at 10 km/h, 1% incline). Comparing runs, a lower HR shows fitness progress."
-    )));
-    ui.horizontal(|ui| {
-        for t in &tests {
-            if ui
-                .selectable_label(app.pages.analysis.test_selected == Some(t.id), &t.name)
-                .clicked()
-            {
-                app.pages.analysis.test_selected = Some(t.id);
-                app.pages.analysis.test_edit = None;
-            }
-        }
-        if ui.button(tr!("➕ Novo teste", "➕ New test")).clicked() {
-            app.pages.analysis.test_edit = Some(TestEdit {
-                t: RefTest {
-                    name: tr!("5 km a 6:00/km", "5 km at 6:00/km").into(),
-                    modality: Modality::Treadmill,
-                    distance_m: 5000.0,
-                    target_pace: Some(360.0),
-                    incline_pct: Some(1.0),
-                    ..Default::default()
-                },
-                distance: "5".into(),
-                pace: "6:00".into(),
-                incline: "1".into(),
-            });
-        }
-    });
-    if app.pages.analysis.test_selected.is_none() {
-        app.pages.analysis.test_selected = tests.first().map(|t| t.id);
-    }
-    if let Some(e) = app.pages.analysis.test_edit.as_mut() {
-        let mut save = false;
-        let mut cancel = false;
-        widgets::card_frame(ui).show(ui, |ui| {
-            egui::Grid::new("test-edit")
-                .num_columns(2)
-                .spacing([10.0, 6.0])
-                .show(ui, |ui| {
-                    ui.label(tr!("Nome", "Name"));
-                    ui.text_edit_singleline(&mut e.t.name);
-                    ui.end_row();
-                    ui.label(tr!("Onde", "Where"));
-                    ui.horizontal(|ui| {
-                        ui.selectable_value(&mut e.t.modality, Modality::Treadmill, Modality::Treadmill.label());
-                        ui.selectable_value(&mut e.t.modality, Modality::RoadRun, Modality::RoadRun.label());
-                    });
-                    ui.end_row();
-                    ui.label(tr!("Distância (km)", "Distance (km)"));
-                    ui.add(egui::TextEdit::singleline(&mut e.distance).desired_width(60.0));
-                    ui.end_row();
-                    ui.label(tr!("Pace alvo", "Target pace"));
-                    ui.horizontal(|ui| {
-                        ui.add(egui::TextEdit::singleline(&mut e.pace).desired_width(60.0));
-                        if let Some(p) = format::parse_pace(&e.pace) {
-                            ui.label(weak(
-                                ui,
-                                trf!(
-                                    "= {} km/h na esteira",
-                                    "= {} km/h on the treadmill",
-                                    format::num(format::pace_to_kmh(p), 1)
-                                ),
-                            ));
-                        }
-                    });
-                    ui.end_row();
-                    if e.t.modality == Modality::Treadmill {
-                        ui.label(tr!("Inclinação (%)", "Incline (%)"));
-                        ui.add(egui::TextEdit::singleline(&mut e.incline).desired_width(60.0));
-                        ui.end_row();
-                    }
-                });
-            ui.horizontal(|ui| {
-                save = ui.button(tr!("💾 Salvar", "💾 Save")).clicked();
-                cancel = ui.button(tr!("Cancelar", "Cancel")).clicked();
-            });
-        });
-        if save {
-            e.t.distance_m = format::parse_num(&e.distance).map(|v| v * 1000.0).unwrap_or(5000.0);
-            e.t.target_pace = format::parse_pace(&e.pace);
-            e.t.incline_pct = format::parse_num(&e.incline);
-            let t = e.t.clone();
-            match app.db.save_reference_test(&t) {
-                Ok(id) => {
-                    app.pages.analysis.test_selected = Some(id);
-                    app.pages.analysis.test_edit = None;
-                }
-                Err(err) => app.toast_error(err.to_string()),
-            }
-        } else if cancel {
-            app.pages.analysis.test_edit = None;
-        }
-        return;
-    }
-    let Some(test) = tests
-        .iter()
-        .find(|t| Some(t.id) == app.pages.analysis.test_selected)
-        .cloned()
-    else {
-        widgets::empty_state(ui, tr!("Crie um teste para começar.", "Create a test to start."));
-        return;
-    };
-    ui.add_space(4.0);
-    ui.horizontal(|ui| {
-        ui.label(RichText::new(&test.name).size(17.0).strong());
-        let mut desc = format!("{} · {}", test.modality.label(), format::km(test.distance_m));
-        if let Some(p) = test.target_pace {
-            desc.push_str(&format!(
-                " · {} ({} km/h)",
-                format::pace_unit(p),
-                format::num(format::pace_to_kmh(p), 1)
-            ));
-        }
-        if let Some(i) = test.incline_pct {
-            desc.push_str(&trf!(" · inclinação {}%", " · incline {}%", format::num_trim(i, 1)));
-        }
-        ui.label(weak(ui, desc));
-        if ui.small_button(tr!("✏ Editar", "✏ Edit")).clicked() {
-            app.pages.analysis.test_edit = Some(TestEdit {
-                distance: format::num_trim(test.distance_m / 1000.0, 2),
-                pace: test.target_pace.map(format::pace).unwrap_or_default(),
-                incline: test.incline_pct.map(|v| format::num_trim(v, 1)).unwrap_or_default(),
-                t: test.clone(),
-            });
-        }
-        if ui
-            .small_button(RichText::new(tr!("🗑 Excluir", "🗑 Delete")).color(widgets::BAD))
-            .clicked()
-        {
-            let _ = app.db.delete_reference_test(test.id);
-            app.pages.analysis.test_selected = None;
-        }
-    });
-    let run_ids = app.db.reference_runs(test.id).unwrap_or_default();
-    // add an execution
-    ui.horizontal(|ui| {
-        ui.label(tr!("Adicionar execução:", "Add a run:"));
-        let candidates: Vec<&Activity> = app
-            .data
-            .activities
-            .iter()
-            .filter(|a| a.modality.is_run() && !run_ids.contains(&a.id))
-            .filter(|a| {
-                a.distance()
-                    .is_some_and(|d| (d - test.distance_m).abs() <= test.distance_m * 0.15)
-            })
-            .collect();
-        let sel = &mut app.pages.analysis.add_run;
-        let label = sel
-            .and_then(|id| app.data.get(id))
-            .map(|a| format!("{} · {}", format::date(day_of(a)), a.modality.label()));
-        egui::ComboBox::from_id_salt("add-run")
-            .selected_text(label.unwrap_or_else(|| tr!("escolha uma corrida", "choose a run").into()))
-            .width(260.0)
-            .show_ui(ui, |ui| {
-                for a in candidates {
-                    let text = format!(
-                        "{} · {} · {} · {}",
-                        format::date(day_of(a)),
-                        a.modality.label(),
-                        format::opt_km(a.distance()),
-                        format::opt_pace(a.pace_s_per_km())
-                    );
-                    ui.selectable_value(sel, Some(a.id), text);
-                }
-            });
-        if ui
-            .add_enabled(sel.is_some(), egui::Button::new(tr!("Adicionar", "Add")))
-            .clicked()
-            && let Some(id) = sel.take()
-        {
-            let _ = app.db.set_reference_run(test.id, id, true);
-        }
-    });
-    let runs: Vec<&Activity> = run_ids.iter().filter_map(|id| app.data.get(*id)).collect();
-    if runs.is_empty() {
-        ui.label(weak(ui, tr!("Nenhuma execução ainda.", "No runs yet.")));
-        return;
-    }
-    let kms = (test.distance_m / 1000.0).round().max(1.0) as usize;
-    let pts: Vec<[f64; 2]> = runs
-        .iter()
-        .filter_map(|a| Some([charts::date_to_x(day_of(a)), a.avg_hr?]))
-        .collect();
-    let mut o = ChartOpts::new("test-hist", Axis::Date, Axis::Bpm);
-    o.height = 200.0;
-    o.title = Some(tr!("FC média em cada execução", "Average HR in each run"));
-    charts::line_chart(
-        ui,
-        o,
-        vec![
-            Series::line(tr!("FC média", "Avg HR"), widgets::HR, pts.clone()),
-            Series::dots(tr!("FC média", "Avg HR"), widgets::HR, pts),
-        ],
-    );
-    let mut remove = None;
-    let mut open = None;
-    let notes = trends::comparability_notes(&runs, &app.data.metrics);
-    TableBuilder::new(ui)
-        .striped(true)
-        .cell_layout(egui::Layout::left_to_right(egui::Align::Center))
-        .column(Column::initial(60.0))
-        .columns(Column::initial(84.0).at_least(60.0), 4)
-        .columns(Column::initial(66.0).at_least(50.0), kms)
-        .column(Column::initial(80.0))
-        .column(Column::remainder())
-        .header(24.0, |mut h| {
-            h.col(|ui| {
-                ui.label(RichText::new("#").strong());
-            });
-            for t in [
-                tr!("Data", "Date"),
-                "Pace",
-                tr!("FC média", "Avg HR"),
-                tr!("FC máxima", "Max HR"),
-            ] {
-                h.col(|ui| {
-                    ui.label(RichText::new(t).strong());
-                });
-            }
-            for k in 1..=kms {
-                h.col(|ui| {
-                    ui.label(RichText::new(trf!("FC km {k}", "HR km {k}")).strong());
-                });
-            }
-            h.col(|ui| {
-                ui.label(RichText::new(tr!("Deriva", "Drift")).strong());
-            });
-            h.col(|_| {});
-        })
-        .body(|mut body| {
-            for (i, a) in runs.iter().enumerate() {
-                let m = app.data.metrics(a.id);
-                body.row(24.0, |mut row| {
-                    row.col(|ui| {
-                        if ui.link(trf!("Teste {}", "Test {}", i + 1)).clicked() {
-                            open = Some(a.id);
-                        }
-                    });
-                    row.col(|ui| {
-                        ui.label(format::date(day_of(a)));
-                    });
-                    row.col(|ui| {
-                        ui.label(format::opt_pace(a.pace_s_per_km()));
-                    });
-                    row.col(|ui| {
-                        ui.label(RichText::new(format::bpm(a.avg_hr)).strong());
-                    });
-                    row.col(|ui| {
-                        ui.label(format::bpm(a.max_hr));
-                    });
-                    for k in 0..kms {
-                        row.col(|ui| {
-                            ui.label(format::bpm(m.and_then(|m| m.km_hr.get(k).copied().flatten())));
-                        });
-                    }
-                    row.col(|ui| {
-                        ui.label(
-                            m.and_then(|m| m.drift.as_ref())
-                                .and_then(|d| d.decoupling_pct)
-                                .map(|v| format!("{}%", format::num(v, 1)))
-                                .unwrap_or_else(format::dash),
-                        );
-                    });
-                    row.col(|ui| {
-                        if ui
-                            .small_button("✖")
-                            .on_hover_text(tr!("Remover do teste", "Remove from the test"))
-                            .clicked()
-                        {
-                            remove = Some(a.id);
-                        }
-                    });
-                });
-            }
-        });
-    if runs.len() >= 2 {
-        let first = runs[0].avg_hr.unwrap_or(0.0);
-        let last = runs[runs.len() - 1].avg_hr.unwrap_or(0.0);
-        if first > 0.0 && last > 0.0 {
-            let d = last - first;
-            widgets::note(
-                ui,
-                &trf!(
-                    "Da primeira à última execução: {} bpm de FC média.",
-                    "From the first to the latest run: {} bpm of average HR.",
-                    if d > 0.0 {
-                        format!("+{}", d.round())
-                    } else {
-                        format!("{}", d.round())
-                    }
-                ),
-                if d <= 0.0 { widgets::GOOD } else { widgets::WARN },
-            );
-        }
-    }
-    for n in notes {
-        widgets::note(ui, &format!("⚠ {n}"), widgets::WARN);
-    }
-    if let Some(id) = remove {
-        let _ = app.db.set_reference_run(test.id, id, false);
-    }
-    if let Some(id) = open {
-        app.go(Page::Activity(id));
-    }
-}
-
 fn converter(app: &mut App, ui: &mut Ui) {
-    let s = &mut app.pages.analysis;
+    let s = &mut app.pages.progress;
     ui.horizontal(|ui| {
         ui.label(tr!("Pace", "Pace"));
         if ui
@@ -840,6 +524,291 @@ fn heart_rate(app: &mut App, ui: &mut Ui) {
     }
     if let Some(id) = open {
         app.pages.activity.open_tab = Some(super::activity::Tab::Zones);
+        app.go(Page::Activity(id));
+    }
+}
+
+fn goal(app: &mut App, ui: &mut Ui) {
+    let Some(c) = app.coach.clone() else {
+        widgets::empty_state(
+            ui,
+            tr!(
+                "Defina uma meta para ver a evolução.",
+                "Set a goal to see the progress."
+            ),
+        );
+        return;
+    };
+    ui.label(RichText::new(c.goal.describe()).size(18.0).strong());
+    widgets::card_grid(
+        ui,
+        200.0,
+        &c.projection
+            .parts
+            .iter()
+            .map(|p| {
+                (
+                    p.label.clone(),
+                    p.now.clone(),
+                    Some(trf!(
+                        "meta {} · {}%",
+                        "goal {} · {}%",
+                        p.goal,
+                        (p.fraction * 100.0).round()
+                    )),
+                )
+            })
+            .collect::<Vec<_>>(),
+    );
+    let pace = c.goal.goal_pace().unwrap_or(c.fitness.easy_pace);
+    widgets::section(
+        ui,
+        &trf!(
+            "FC estimada no pace {}",
+            "Estimated HR at {} pace",
+            format::pace_unit(pace)
+        ),
+    );
+    ui.label(weak(
+        ui,
+        tr!(
+            "Cada ponto é uma corrida, ajustada para o mesmo pace pela relação FC × velocidade das suas corridas. Descendo = mais eficiente.",
+            "Each point is a run, adjusted to the same pace using the HR × speed relation of your runs. Going down = more efficient."
+        ),
+    ));
+    let pts: Vec<[f64; 2]> = c
+        .fitness
+        .hr_history
+        .iter()
+        .map(|(d, h)| [charts::date_to_x(*d), *h])
+        .collect();
+    let mut o = ChartOpts::new("goal-hr", Axis::Date, Axis::Bpm);
+    o.height = 240.0;
+    if let Some(t) = c.goal.target_hr {
+        o.hlines.push((t, tr!("meta", "goal").into()));
+    }
+    let mut series = vec![
+        Series::line(tr!("FC", "HR"), widgets::HR, pts.clone()),
+        Series::dots(tr!("FC", "HR"), widgets::HR, pts),
+    ];
+    // trend line and its projection
+    // projection: only while the HR still has to come down to the goal
+    if let (Some(slope), Some(last), Some(target)) = (
+        c.fitness.hr_trend_per_week,
+        c.fitness.hr_history.last(),
+        c.goal.target_hr,
+    ) && slope < 0.0
+        && last.1 > target
+    {
+        let x0 = charts::date_to_x(last.0);
+        let weeks = ((last.1 - target) / -slope).min(26.0);
+        let end = x0 + weeks * 7.0;
+        let y_end = target;
+        series.push(Series::line(
+            tr!("projeção", "projection"),
+            egui::Color32::GRAY,
+            vec![[x0, last.1], [end, y_end]],
+        ));
+    }
+    charts::line_chart(ui, o, series);
+    widgets::section(ui, tr!("Longão e tempo previsto", "Long run and predicted time"));
+    let runs: Vec<&Activity> = app
+        .data
+        .activities
+        .iter()
+        .filter(|a| day_of(a) >= c.goal.start_date - chrono::Duration::days(28))
+        .collect();
+    let mut longest: std::collections::BTreeMap<chrono::NaiveDate, f64> = Default::default();
+    for a in &runs {
+        let e = longest.entry(crate::coach::week_start(day_of(a))).or_default();
+        *e = e.max(a.distance().unwrap_or(0.0));
+    }
+    ui.columns(2, |cols| {
+        let bars = longest
+            .iter()
+            .map(|(d, m)| {
+                (
+                    charts::date_to_x(*d),
+                    *m,
+                    widgets::PACE,
+                    format!("{} · {}", format::date_short(*d), format::km(*m)),
+                )
+            })
+            .collect();
+        let mut o = ChartOpts::new("goal-long", Axis::Date, Axis::Distance);
+        o.title = Some(tr!("Maior corrida por semana", "Longest run per week"));
+        o.height = 180.0;
+        o.hlines.push((c.goal.distance_m, tr!("meta", "goal").into()));
+        charts::bar_chart(&mut cols[0], o, bars, 5.0);
+        // predicted time by run (Riegel from each run)
+        let pred: Vec<[f64; 2]> = runs
+            .iter()
+            .filter_map(|a| {
+                let d = a.distance()?;
+                let t = a.duration()?;
+                (d >= 1000.0).then(|| [charts::date_to_x(day_of(a)), t * (c.goal.distance_m / d).powf(1.06)])
+            })
+            .collect();
+        let mut o = ChartOpts::new("goal-pred", Axis::Date, Axis::Time);
+        o.title = Some(tr!(
+            "Tempo previsto para a distância (por corrida)",
+            "Predicted time for the distance (per run)"
+        ));
+        o.height = 180.0;
+        o.invert_y = true;
+        if let Some(t) = c.goal.target_time_s {
+            o.hlines.push((t, tr!("meta", "goal").into()));
+        }
+        charts::line_chart(
+            &mut cols[1],
+            o,
+            vec![Series::dots(tr!("previsão", "prediction"), widgets::SPEED, pred)],
+        );
+    });
+}
+
+fn volume(app: &mut App, ui: &mut Ui) {
+    let today = chrono::Local::now().date_naive();
+    let from = today - chrono::Duration::days(7 * 16);
+    let runs: Vec<&Activity> = app.data.activities.iter().filter(|a| day_of(a) >= from).collect();
+    let w = crate::report::weeks(&runs, app.coach.as_ref(), from, today);
+    ui.label(weak(ui, tr!("Últimas 16 semanas.", "Last 16 weeks.")));
+    ui.columns(2, |cols| {
+        let km = w
+            .iter()
+            .map(|(d, x)| {
+                (
+                    charts::date_to_x(*d),
+                    x.km,
+                    widgets::PACE,
+                    format!(
+                        "{} · {} km · {} corridas",
+                        format::date_short(*d),
+                        format::num(x.km, 1),
+                        x.runs
+                    ),
+                )
+            })
+            .collect();
+        let mut o = ChartOpts::new("vol-km", Axis::Date, Axis::Plain);
+        o.title = Some(tr!("Km por semana", "Km per week"));
+        o.height = 200.0;
+        charts::bar_chart(&mut cols[0], o, km, 5.0);
+        let h = w
+            .iter()
+            .map(|(d, x)| {
+                (
+                    charts::date_to_x(*d),
+                    x.secs / 3600.0,
+                    widgets::ACCENT,
+                    format!("{} · {}", format::date_short(*d), format::hours_short(x.secs)),
+                )
+            })
+            .collect();
+        let mut o = ChartOpts::new("vol-h", Axis::Date, Axis::Hours);
+        o.title = Some(tr!("Horas por semana", "Hours per week"));
+        o.height = 200.0;
+        charts::bar_chart(&mut cols[1], o, h, 5.0);
+    });
+    let adherence: Vec<[f64; 2]> = w
+        .iter()
+        .filter(|(_, x)| x.planned > 0)
+        .map(|(d, x)| [charts::date_to_x(*d), x.done as f64 / x.planned as f64 * 100.0])
+        .collect();
+    if !adherence.is_empty() {
+        let mut o = ChartOpts::new("vol-adh", Axis::Date, Axis::Percent);
+        o.title = Some(tr!("Treinos do plano feitos (%)", "Plan sessions done (%)"));
+        o.height = 160.0;
+        charts::line_chart(
+            ui,
+            o,
+            vec![
+                Series::line("%", widgets::GOOD, adherence.clone()),
+                Series::dots("%", widgets::GOOD, adherence),
+            ],
+        );
+    }
+    let hr: Vec<[f64; 2]> = w
+        .iter()
+        .filter(|(_, x)| x.hr_w > 0.0)
+        .map(|(d, x)| [charts::date_to_x(*d), x.hr_sum / x.hr_w])
+        .collect();
+    let mut o = ChartOpts::new("vol-hr", Axis::Date, Axis::Bpm);
+    o.title = Some(tr!("FC média por semana", "Average HR per week"));
+    o.height = 160.0;
+    charts::line_chart(
+        ui,
+        o,
+        vec![
+            Series::line(tr!("FC", "HR"), widgets::HR, hr.clone()),
+            Series::dots(tr!("FC", "HR"), widgets::HR, hr),
+        ],
+    );
+}
+
+fn dist_label(d: f64) -> String {
+    if (d - MILE_M).abs() < 1.0 {
+        tr!("1 milha", "1 mile").into()
+    } else if d < 1000.0 {
+        format!("{} m", d.round())
+    } else {
+        format!("{} km", format::num_trim(d / 1000.0, 1))
+    }
+}
+
+fn records(app: &mut App, ui: &mut Ui) {
+    ui.label(weak(
+        ui,
+        tr!(
+            "O trecho mais rápido de cada distância, dentro de qualquer corrida. A esteira fica separada (a distância é estimada pelo relógio).",
+            "The fastest stretch of each distance, inside any run. The treadmill is kept apart (its distance is estimated by the watch)."
+        ),
+    ));
+    let efforts = app.db.best_efforts();
+    let mut open = None;
+    for m in [Modality::RoadRun, Modality::Treadmill] {
+        widgets::section(ui, m.label());
+        egui::Grid::new(format!("rec-{}", m.code()))
+            .striped(true)
+            .min_col_width(110.0)
+            .show(ui, |ui| {
+                for t in [
+                    tr!("Distância", "Distance"),
+                    tr!("Tempo", "Time"),
+                    "Pace",
+                    tr!("Data", "Date"),
+                    tr!("Corrida", "Run"),
+                ] {
+                    ui.label(RichText::new(t).strong());
+                }
+                ui.end_row();
+                for d in RECORD_DISTANCES {
+                    let best = efforts
+                        .iter()
+                        .filter(|(id, _)| app.data.get(**id).is_some_and(|a| a.modality == m))
+                        .filter_map(|(id, l)| l.iter().find(|(dd, _)| (dd - d).abs() < 1.0).map(|(_, t)| (*id, *t)))
+                        .min_by(|a, b| a.1.total_cmp(&b.1));
+                    ui.label(RichText::new(dist_label(d)).strong());
+                    match best.and_then(|(id, t)| Some((app.data.get(id)?, t))) {
+                        Some((a, t)) => {
+                            ui.label(RichText::new(format::duration(t)).strong().color(widgets::GOOD));
+                            ui.label(format::pace_unit(t / (d / 1000.0)));
+                            ui.label(format::date(day_of(a)));
+                            if ui.link(format::opt_km(a.distance())).clicked() {
+                                open = Some(a.id);
+                            }
+                        }
+                        None => {
+                            for _ in 0..4 {
+                                ui.label(weak(ui, format::dash()));
+                            }
+                        }
+                    }
+                    ui.end_row();
+                }
+            });
+    }
+    if let Some(id) = open {
         app.go(Page::Activity(id));
     }
 }

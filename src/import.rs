@@ -19,6 +19,8 @@ pub enum Outcome {
     AlreadyImported,
     /// Different file, same workout (re-export): id of the existing activity.
     SameActivity(i64),
+    /// Not a run (FitLedger only tracks running): ignored.
+    NotRun,
 }
 
 #[derive(Debug, Clone, Default)]
@@ -26,6 +28,7 @@ pub struct Report {
     pub imported: Vec<(String, i64)>,
     pub skipped: usize,
     pub same_activity: Vec<String>,
+    pub not_run: usize,
     pub errors: Vec<(String, String)>,
 }
 
@@ -37,6 +40,13 @@ impl Report {
                 "{} já existente(s)",
                 "{} already there",
                 self.skipped + self.same_activity.len()
+            ));
+        }
+        if self.not_run > 0 {
+            parts.push(trf!(
+                "{} ignorada(s) (não é corrida)",
+                "{} ignored (not a run)",
+                self.not_run
             ));
         }
         if !self.errors.is_empty() {
@@ -53,6 +63,20 @@ pub struct KnownErrors(pub BTreeMap<String, (String, String)>);
 
 impl KnownErrors {
     const KEY: &'static str = "import_errors";
+    const IGNORED: &'static str = "import_ignored";
+
+    /// Files that are not runs (hash → (file name, sport)): never retried.
+    pub fn load_ignored(db: &Db) -> Self {
+        db.get_kv(Self::IGNORED)
+            .and_then(|s| serde_json::from_str(&s).ok())
+            .unwrap_or_default()
+    }
+
+    pub fn save_ignored(&self, db: &Db) {
+        if let Ok(s) = serde_json::to_string(self) {
+            let _ = db.set_kv(Self::IGNORED, &s);
+        }
+    }
 
     pub fn load(db: &Db) -> Self {
         db.get_kv(Self::KEY)
@@ -108,7 +132,8 @@ fn read_file(p: &Path) -> Result<Vec<u8>, String> {
 /// Files in `paths` that are not in the database yet (and did not fail before).
 pub fn pending(db: &Db, paths: &[PathBuf]) -> Vec<PathBuf> {
     let known = db.known_hashes().unwrap_or_default();
-    let failed = KnownErrors::load(db);
+    let mut failed = KnownErrors::load(db);
+    failed.0.extend(KnownErrors::load_ignored(db).0);
     paths
         .iter()
         .filter(|p| {
@@ -129,6 +154,9 @@ pub fn import_bytes(db: &mut Db, name: &str, bytes: &[u8]) -> Result<Outcome, St
     }
     let messages = fit::decode::decode(bytes).map_err(|e| e.to_string())?;
     let parsed = fit::activity::parse(&messages).map_err(|e| e.to_string())?;
+    if !parsed.modality.is_run() {
+        return Ok(Outcome::NotRun);
+    }
     if let Some(existing) = db.find_same_activity(&parsed).map_err(|e| e.to_string())? {
         return Ok(Outcome::SameActivity(existing));
     }
@@ -153,6 +181,7 @@ pub fn import_files(
 ) -> Report {
     let mut report = Report::default();
     let mut known_errors = KnownErrors::load(db);
+    let mut ignored = KnownErrors::load_ignored(db);
     for (i, p) in paths.iter().enumerate() {
         let name = display_name(p);
         progress(i, paths.len(), &name);
@@ -163,12 +192,16 @@ pub fn import_files(
             {
                 known_errors.0.insert(h, (name.clone(), e.clone()));
             }
+            if let (Ok(Outcome::NotRun), Some(h)) = (&r, crate::hash::sha256_hex(&bytes)) {
+                ignored.0.insert(h, (name.clone(), "not a run".into()));
+            }
             r
         });
         match result {
             Ok(Outcome::Imported(id)) => report.imported.push((name, id)),
             Ok(Outcome::AlreadyImported) => report.skipped += 1,
             Ok(Outcome::SameActivity(_)) => report.same_activity.push(name),
+            Ok(Outcome::NotRun) => report.not_run += 1,
             Err(e) => report.errors.push((name, e)),
         }
     }
@@ -176,6 +209,7 @@ pub fn import_files(
     if remember_errors {
         known_errors.save(db);
     }
+    ignored.save_ignored(db);
     report
 }
 

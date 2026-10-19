@@ -1,26 +1,21 @@
-//! User interface (egui). `App` owns the database connection and a cache of
-//! the activities; each page lives in its own module.
+//! User interface (egui). `App` owns the database connection, a cache of
+//! the runs and the coach state; each page lives in its own module.
 
 mod activities;
 mod activity;
-mod analysis;
-mod calendar;
 pub mod charts;
 mod compare;
-mod dashboard;
-mod evolution;
-mod goals;
-mod insights_page;
-mod manual;
+mod goal_page;
 mod onboarding;
-mod plans;
-mod records;
+mod plan_page;
+mod progress;
+mod reports_page;
 mod settings_page;
-mod strength;
-mod tennis;
+mod today;
 pub mod widgets;
 
 use crate::analysis::metrics::{self, Metrics};
+use crate::coach::store::CoachState;
 use crate::db::Db;
 use crate::import;
 use crate::model::{Activity, Modality};
@@ -36,18 +31,14 @@ pub const APP_NAME: &str = "FitLedger";
 #[derive(Debug, Clone, PartialEq)]
 pub enum Page {
     Onboarding,
-    Dashboard,
+    Today,
+    Plan,
+    Goal,
     Activities(Option<Modality>),
     Activity(i64),
-    Manual(Option<i64>),
     Compare,
-    Calendar,
-    Plans,
-    Goals,
-    Evolution,
-    Records,
-    Analysis,
-    Insights,
+    Progress,
+    Reports,
     Settings,
 }
 
@@ -118,6 +109,8 @@ pub struct App {
     applied_theme: Option<Theme>,
     shooter: Option<crate::screenshots::Shooter>,
     shots: Vec<(String, Page, Option<activity::Tab>)>,
+    /// Goal, fitness, projection and sessions; None until a goal exists.
+    pub coach: Option<CoachState>,
 }
 
 /// Per-page UI state that must survive between frames.
@@ -125,17 +118,13 @@ pub struct App {
 pub struct PageStates {
     pub activities: activities::State,
     pub activity: activity::State,
-    pub manual: manual::State,
-    pub analysis: analysis::State,
-    pub calendar: calendar::State,
-    pub plans: plans::State,
-    pub goals: goals::State,
-    pub evolution: evolution::State,
-    pub strength: strength::State,
+    pub progress: progress::State,
+    pub plan: plan_page::State,
+    pub goal: goal_page::State,
+    pub reports: reports_page::State,
     pub settings: settings_page::State,
     pub onboarding: onboarding::State,
     pub compare: compare::State,
-    pub insights: insights_page::State,
 }
 
 impl App {
@@ -151,7 +140,7 @@ impl App {
             paths,
             settings,
             data: Data::default(),
-            page: if first_run { Page::Onboarding } else { Page::Dashboard },
+            page: if first_run { Page::Onboarding } else { Page::Today },
             history: Vec::new(),
             job: Arc::new(Mutex::new(JobState::default())),
             toasts: Vec::new(),
@@ -162,6 +151,7 @@ impl App {
             applied_theme: None,
             shooter: crate::screenshots::Shooter::from_env(),
             shots: Vec::new(),
+            coach: None,
         };
         app.reload();
         if app.shooter.is_some() {
@@ -175,6 +165,7 @@ impl App {
                 let files = import::scan(&app.paths.fits);
                 import::import_files(&mut app.db, &files, false, &mut |_, _, _| {});
             }
+            app.settings = app.db.load_settings();
             app.settings.onboarded = true;
             app.save_settings();
             app.reload();
@@ -189,7 +180,7 @@ impl App {
                 app.import_from_folder(true);
             }
         }
-        // the periodic check always runs, but only queries GitHub while enabled
+        // the check runs right away and then daily, but only queries GitHub while enabled
         AUTO_UPDATE.store(app.settings.auto_update, std::sync::atomic::Ordering::Relaxed);
         let ctx = cc.egui_ctx.clone();
         crate::update::ao_mudar(move || ctx.request_repaint());
@@ -197,14 +188,24 @@ impl App {
         app
     }
 
-    /// Reloads the activity cache from the database.
+    /// Reloads the runs from the database and lets the coach adjust the plan.
     pub fn reload(&mut self) {
         match self.db.activities() {
-            Ok(a) => self.data.activities = a,
+            Ok(a) => self.data.activities = a.into_iter().filter(|a| a.modality.is_run()).collect(),
             Err(e) => self.toast_error(trf!("Erro ao ler o banco: {e}", "Database read error: {e}")),
         }
         self.data.metrics = metrics::all_metrics(&self.db);
         self.data.generation += 1;
+        self.refresh_coach(false);
+    }
+
+    /// Rebuilds the future of the plan from the current goal and runs.
+    pub fn refresh_coach(&mut self, goal_changed: bool) {
+        let today = chrono::Local::now().date_naive();
+        match crate::coach::store::refresh(&mut self.db, today, goal_changed) {
+            Ok(c) => self.coach = c,
+            Err(e) => self.toast_error(trf!("Erro no plano: {e}", "Plan error: {e}")),
+        }
     }
 
     pub fn save_settings(&mut self) {
@@ -230,7 +231,7 @@ impl App {
         if let Some(p) = self.history.pop() {
             self.page = p;
         } else {
-            self.page = Page::Dashboard;
+            self.page = Page::Today;
         }
     }
 
@@ -373,8 +374,9 @@ impl App {
     fn apply_theme(&mut self, ctx: &egui::Context) {
         if self.applied_theme != Some(self.settings.theme) {
             ctx.set_theme(match self.settings.theme {
-                Theme::Dark => egui::Theme::Dark,
-                Theme::Light => egui::Theme::Light,
+                Theme::System => egui::ThemePreference::System,
+                Theme::Dark => egui::ThemePreference::Dark,
+                Theme::Light => egui::ThemePreference::Light,
             });
             self.applied_theme = Some(self.settings.theme);
         }
@@ -393,23 +395,24 @@ impl App {
             ui.add_sized([ui.available_width(), 30.0], egui::Button::selectable(selected, text))
                 .clicked()
         };
-        let in_activities = matches!(
-            page,
-            Page::Activities(_) | Page::Activity(_) | Page::Manual(_) | Page::Compare
-        );
-        if nav(ui, "📊", tr!("Dashboard", "Dashboard"), page == Page::Dashboard) {
-            self.go(Page::Dashboard);
+        let in_runs = matches!(page, Page::Activities(_) | Page::Activity(_) | Page::Compare);
+        if nav(ui, "🏠", tr!("Hoje", "Today"), page == Page::Today) {
+            self.go(Page::Today);
         }
-        if nav(ui, "🏃", tr!("Atividades", "Activities"), in_activities) {
+        if nav(ui, "📅", tr!("Plano", "Plan"), page == Page::Plan) {
+            self.go(Page::Plan);
+        }
+        if nav(ui, "🎯", tr!("Meta", "Goal"), page == Page::Goal) {
+            self.go(Page::Goal);
+        }
+        if nav(ui, "🏃", tr!("Corridas", "Runs"), in_runs) {
             self.go(Page::Activities(None));
         }
-        if in_activities {
-            let sub: [(Option<Modality>, &str); 5] = [
+        if in_runs {
+            let sub: [(Option<Modality>, &str); 3] = [
                 (None, tr!("Todas", "All")),
                 (Some(Modality::RoadRun), Modality::RoadRun.label()),
                 (Some(Modality::Treadmill), Modality::Treadmill.label()),
-                (Some(Modality::Tennis), Modality::Tennis.label()),
-                (Some(Modality::Strength), Modality::Strength.label()),
             ];
             for (m, label) in sub {
                 ui.horizontal(|ui| {
@@ -424,14 +427,9 @@ impl App {
                 });
             }
         }
-        let items: [(&str, &str, Page); 8] = [
-            ("📅", tr!("Calendário", "Calendar"), Page::Calendar),
-            ("📋", tr!("Planos", "Plans"), Page::Plans),
-            ("🎯", tr!("Metas", "Goals"), Page::Goals),
-            ("📈", tr!("Evolução", "Progress"), Page::Evolution),
-            ("🏆", tr!("Records", "Records"), Page::Records),
-            ("🔬", tr!("Análises", "Analysis"), Page::Analysis),
-            ("💡", tr!("Insights", "Insights"), Page::Insights),
+        let items: [(&str, &str, Page); 3] = [
+            ("📈", tr!("Análises", "Analysis"), Page::Progress),
+            ("📄", tr!("Relatórios", "Reports"), Page::Reports),
             ("⚙", tr!("Configurações", "Settings"), Page::Settings),
         ];
         for (icon, label, p) in items {
@@ -450,16 +448,6 @@ impl App {
             self.update_notice(ui);
             self.job_status(ui);
             ui.add_space(4.0);
-            if ui
-                .add_sized(
-                    [ui.available_width(), 28.0],
-                    egui::Button::new(tr!("➕ Atividade manual", "➕ Manual activity")),
-                )
-                .clicked()
-            {
-                self.pages.manual = manual::State::default();
-                self.go(Page::Manual(None));
-            }
             if ui
                 .add_sized(
                     [ui.available_width(), 28.0],
@@ -612,8 +600,10 @@ impl App {
     /// Pages captured by FITLEDGER_SCREENSHOTS.
     fn screenshot_plan(&self) -> Vec<(String, Page, Option<activity::Tab>)> {
         let mut v = vec![
-            ("dashboard".to_string(), Page::Dashboard, None),
-            ("activities".into(), Page::Activities(None), None),
+            ("today".to_string(), Page::Today, None),
+            ("plan".into(), Page::Plan, None),
+            ("goal".into(), Page::Goal, None),
+            ("runs".into(), Page::Activities(None), None),
         ];
         let run = self
             .data
@@ -622,35 +612,20 @@ impl App {
             .find(|a| a.modality == Modality::RoadRun && a.has_gps);
         if let Some(a) = run {
             for (name, tab) in [
-                ("activity-charts", activity::Tab::Charts),
-                ("activity-splits", activity::Tab::Splits),
-                ("activity-zones", activity::Tab::Zones),
-                ("activity-drift", activity::Tab::Drift),
-                ("activity-route", activity::Tab::Map),
-                ("activity-notes", activity::Tab::Notes),
+                ("run-charts", activity::Tab::Charts),
+                ("run-splits", activity::Tab::Splits),
+                ("run-zones", activity::Tab::Zones),
+                ("run-drift", activity::Tab::Drift),
+                ("run-route", activity::Tab::Map),
+                ("run-notes", activity::Tab::Notes),
             ] {
                 v.push((name.into(), Page::Activity(a.id), Some(tab)));
             }
         }
-        if let Some(t) = self.data.activities.iter().find(|a| a.modality == Modality::Tennis) {
-            v.push((
-                "activity-tennis".into(),
-                Page::Activity(t.id),
-                Some(activity::Tab::Charts),
-            ));
-        }
         v.extend([
-            ("tennis".into(), Page::Activities(Some(Modality::Tennis)), None),
-            ("strength".into(), Page::Activities(Some(Modality::Strength)), None),
-            ("calendar".into(), Page::Calendar, None),
-            ("plans".into(), Page::Plans, None),
-            ("goals".into(), Page::Goals, None),
-            ("evolution".into(), Page::Evolution, None),
-            ("records".into(), Page::Records, None),
-            ("analysis".into(), Page::Analysis, None),
-            ("insights".into(), Page::Insights, None),
+            ("progress".into(), Page::Progress, None),
+            ("reports".into(), Page::Reports, None),
             ("settings".into(), Page::Settings, None),
-            ("manual".into(), Page::Manual(None), None),
             ("onboarding".into(), Page::Onboarding, None),
         ]);
         if let Ok(only) = std::env::var("FITLEDGER_SCREENSHOT_ONLY") {
@@ -728,18 +703,14 @@ impl eframe::App for App {
             .frame(egui::Frame::central_panel(ui.style()).inner_margin(egui::Margin::symmetric(20, 14)))
             .show(ui, |ui| match self.page.clone() {
                 Page::Onboarding => onboarding::show(self, ui),
-                Page::Dashboard => dashboard::show(self, ui),
+                Page::Today => today::show(self, ui),
+                Page::Plan => plan_page::show(self, ui),
+                Page::Goal => goal_page::show(self, ui),
                 Page::Activities(m) => activities::show(self, ui, m),
                 Page::Activity(id) => activity::show(self, ui, id),
-                Page::Manual(id) => manual::show(self, ui, id),
                 Page::Compare => compare::show(self, ui),
-                Page::Calendar => calendar::show(self, ui),
-                Page::Plans => plans::show(self, ui),
-                Page::Goals => goals::show(self, ui),
-                Page::Evolution => evolution::show(self, ui),
-                Page::Records => records::show(self, ui),
-                Page::Analysis => analysis::show(self, ui),
-                Page::Insights => insights_page::show(self, ui),
+                Page::Progress => progress::show(self, ui),
+                Page::Reports => reports_page::show(self, ui),
                 Page::Settings => settings_page::show(self, ui),
             });
         self.report_window(&ctx);

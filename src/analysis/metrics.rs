@@ -41,13 +41,7 @@ pub struct Metrics {
     pub hard_share: f64,
 }
 
-impl Metrics {
-    /// Hard session: lots of time in zones 4–5, or high load per minute, or RPE ≥ 8.
-    pub fn is_hard(&self, a: &Activity) -> bool {
-        let minutes = a.duration().unwrap_or(0.0) / 60.0;
-        self.hard_share >= 0.25 || (minutes > 0.0 && self.load / minutes >= 2.2) || a.rpe.is_some_and(|r| r >= 8)
-    }
-}
+impl Metrics {}
 
 /// Correction factor for treadmill distance typed by the user.
 pub fn distance_scale(a: &Activity) -> f64 {

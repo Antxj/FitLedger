@@ -5,7 +5,9 @@ use serde::{Deserialize, Serialize};
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum Theme {
+    /// Follows Windows (light or dark).
     #[default]
+    System,
     Dark,
     Light,
 }
@@ -14,9 +16,9 @@ pub enum Theme {
 #[serde(rename_all = "snake_case")]
 pub enum ZoneMethod {
     /// Percentages of max heart rate.
-    #[default]
     MaxHr,
     /// Karvonen: percentages of heart rate reserve (max - rest) + rest.
+    #[default]
     Reserve,
     /// Bounds typed by the user.
     Custom,
@@ -48,13 +50,13 @@ impl Default for Settings {
     fn default() -> Self {
         Settings {
             language: None,
-            theme: Theme::Dark,
+            theme: Theme::System,
             age: None,
             weight_kg: None,
             height_cm: None,
             hr_max: None,
             hr_rest: None,
-            zone_method: ZoneMethod::MaxHr,
+            zone_method: ZoneMethod::Reserve,
             custom_zones: [100.0, 120.0, 140.0, 160.0, 175.0],
             onboarded: false,
             auto_update: true,
@@ -94,11 +96,12 @@ impl Settings {
             return v;
         }
         let by_age = self.age.map(|a| 220.0 - a as f64);
-        match (observed_max.filter(|&v| v > 120.0 && v < 230.0), by_age) {
-            (Some(o), Some(a)) => o.max(a),
-            (Some(o), None) => o,
-            (None, Some(a)) => a,
-            (None, None) => 190.0,
+        // a beginner who only ran easily has never reached the real maximum:
+        // the highest value seen only counts when it is above the estimate
+        let estimate = by_age.unwrap_or(185.0);
+        match observed_max.filter(|&v| v > 120.0 && v < 230.0) {
+            Some(o) => o.max(estimate),
+            None => estimate,
         }
     }
 
@@ -137,6 +140,7 @@ mod tests {
     fn zones_by_max_hr() {
         let s = Settings {
             hr_max: Some(200.0),
+            zone_method: ZoneMethod::MaxHr,
             ..Default::default()
         };
         let z = s.zones(None);
@@ -164,8 +168,10 @@ mod tests {
     #[test]
     fn hr_max_fallbacks() {
         let s = Settings::default();
-        assert_eq!(s.effective_hr_max(None), 190.0);
+        assert_eq!(s.effective_hr_max(None), 185.0);
         assert_eq!(s.effective_hr_max(Some(196.0)), 196.0);
+        // easy runs only: the low observed value does not drag the zones down
+        assert_eq!(s.effective_hr_max(Some(150.0)), 185.0);
         let s = Settings {
             age: Some(40),
             ..Default::default()

@@ -21,7 +21,7 @@ pub enum SortKey {
     MaxHr,
     Cadence,
     Ascent,
-    Calories,
+    Drift,
     Load,
 }
 
@@ -74,8 +74,6 @@ pub struct State {
     pub sort: SortKey,
     pub descending: bool,
     pub selected: Vec<i64>,
-    /// Tennis/strength: show the area overview instead of the list.
-    pub show_list: bool,
 }
 
 impl Default for State {
@@ -93,7 +91,6 @@ impl Default for State {
             sort: SortKey::Date,
             descending: true,
             selected: Vec::new(),
-            show_list: false,
         }
     }
 }
@@ -165,14 +162,14 @@ fn sort_value(a: &Activity, key: SortKey) -> f64 {
         SortKey::MaxHr => o(a.max_hr),
         SortKey::Cadence => o(a.avg_cadence),
         SortKey::Ascent => o(a.ascent_m),
-        SortKey::Calories => o(a.calories),
+        SortKey::Drift => o(a.drift_pct),
         SortKey::Load => o(a.load),
     }
 }
 
 pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
     let title = match modality {
-        None => tr!("Atividades", "Activities"),
+        None => tr!("Corridas", "Runs"),
         Some(m) => m.label(),
     };
     ui.horizontal(|ui| {
@@ -198,25 +195,6 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
             }
         });
     });
-
-    if matches!(modality, Some(Modality::Tennis) | Some(Modality::Strength)) {
-        ui.horizontal(|ui| {
-            let s = &mut app.pages.activities.show_list;
-            ui.selectable_value(s, false, tr!("Visão geral", "Overview"));
-            ui.selectable_value(s, true, tr!("Lista de sessões", "Session list"));
-        });
-        ui.separator();
-        if !app.pages.activities.show_list {
-            egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-                if modality == Some(Modality::Tennis) {
-                    super::tennis::overview(app, ui);
-                } else {
-                    super::strength::overview(app, ui);
-                }
-            });
-            return;
-        }
-    }
 
     filters(ui, &mut app.pages.activities);
     ui.add_space(6.0);
@@ -253,8 +231,8 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
     ui.label(weak(
         ui,
         trf!(
-            "{} atividades · {} km · {}",
-            "{} activities · {} km · {}",
+            "{} corridas · {} km · {}",
+            "{} runs · {} km · {}",
             rows.len(),
             format::num(total_km, 1),
             format::hours_short(total_s)
@@ -300,7 +278,7 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
             h.col(|ui| header(ui, tr!("FC máx", "Max HR"), SortKey::MaxHr, &mut sort_click));
             h.col(|ui| header(ui, tr!("Cadência", "Cadence"), SortKey::Cadence, &mut sort_click));
             h.col(|ui| header(ui, tr!("Elevação", "Elevation"), SortKey::Ascent, &mut sort_click));
-            h.col(|ui| header(ui, tr!("Calorias", "Calories"), SortKey::Calories, &mut sort_click));
+            h.col(|ui| header(ui, tr!("Deriva", "Drift"), SortKey::Drift, &mut sort_click));
             h.col(|ui| header(ui, tr!("Carga", "Load"), SortKey::Load, &mut sort_click));
             h.col(|ui| {
                 ui.label(RichText::new(tr!("Observações", "Notes")).strong());
@@ -357,8 +335,8 @@ pub fn show(app: &mut App, ui: &mut Ui, modality: Option<Modality>) {
                 });
                 row.col(|ui| {
                     ui.label(
-                        a.calories
-                            .map(|v| format!("{} kcal", v.round()))
+                        a.drift_pct
+                            .map(|v| format!("{}%", format::num(v, 1)))
                             .unwrap_or_else(format::dash),
                     );
                 });

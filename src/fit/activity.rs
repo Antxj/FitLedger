@@ -121,9 +121,6 @@ pub fn modality_for(sport: Option<i64>, sub_sport: Option<i64>) -> Modality {
         (Some(1), Some(1)) => Modality::Treadmill,  // running / treadmill
         (Some(1), Some(45)) => Modality::Treadmill, // running / indoor_running
         (Some(1), _) => Modality::RoadRun,
-        (Some(8), _) => Modality::Tennis,
-        (Some(4), Some(20)) | (Some(10), Some(20)) => Modality::Strength, // strength_training
-        (Some(10), _) => Modality::Strength,                              // generic training
         _ => Modality::Other,
     }
 }
@@ -319,6 +316,28 @@ fn fill_from_samples(a: &mut ParsedActivity) {
         a.avg_temp.get_or_insert(temps.iter().sum::<f64>() / temps.len() as f64);
         a.max_temp.get_or_insert(temps.iter().cloned().fold(f64::MIN, f64::max));
     }
+    let cads: Vec<f64> = s.iter().filter_map(|x| x.cadence).filter(|&c| c > 0.0).collect();
+    if cads.len() > 10 {
+        a.avg_cadence
+            .get_or_insert((cads.iter().sum::<f64>() / cads.len() as f64).round());
+        a.max_cadence
+            .get_or_insert(cads.iter().cloned().fold(f64::MIN, f64::max));
+    }
+    // elevation gain/loss with a 3 m hysteresis (barometer noise)
+    if a.ascent_m.is_none() && alts.len() > 10 {
+        let (mut gain, mut loss, mut anchor) = (0.0, 0.0, alts[0]);
+        for &v in &alts[1..] {
+            if v - anchor >= 3.0 {
+                gain += v - anchor;
+                anchor = v;
+            } else if anchor - v >= 3.0 {
+                loss += anchor - v;
+                anchor = v;
+            }
+        }
+        a.ascent_m = Some(gain.round());
+        a.descent_m.get_or_insert(loss.round());
+    }
 }
 
 fn manufacturer_name(id: i64) -> &'static str {
@@ -375,8 +394,8 @@ mod tests {
     fn modalities() {
         assert_eq!(modality_for(Some(1), Some(2)), Modality::RoadRun);
         assert_eq!(modality_for(Some(1), Some(1)), Modality::Treadmill);
-        assert_eq!(modality_for(Some(8), Some(0)), Modality::Tennis);
-        assert_eq!(modality_for(Some(10), Some(20)), Modality::Strength);
+        assert_eq!(modality_for(Some(8), Some(0)), Modality::Other);
+        assert_eq!(modality_for(Some(10), Some(20)), Modality::Other);
         assert_eq!(modality_for(Some(2), None), Modality::Other);
         assert_eq!(modality_for(None, None), Modality::Other);
     }

@@ -192,6 +192,7 @@ mod tests {
         let st = run(1801, |_| 2.8, |i| if i < 900 { 130.0 } else { 175.0 });
         let z = Settings {
             hr_max: Some(200.0),
+            zone_method: crate::settings::ZoneMethod::MaxHr,
             ..Default::default()
         }
         .zones(None);

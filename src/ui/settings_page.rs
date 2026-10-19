@@ -1,16 +1,16 @@
 //! Settings (items 7, 31, 32, 33, 37): profile, heart rate and zones,
-//! units, theme, language, updates, backup/restore, export and recalculation.
+//! units, theme, language, updates, backup/restore and recalculation.
 
 use super::widgets::{self, weak};
 use super::{App, JobKind};
 use crate::backup;
 use crate::db::Db;
-use crate::export::{self, What};
 use crate::format;
 use crate::i18n::Idioma;
 use crate::settings::{Theme, ZoneMethod};
 use eframe::egui::{self, RichText, Ui};
 
+#[derive(Default)]
 pub struct State {
     loaded: bool,
     age: String,
@@ -19,28 +19,9 @@ pub struct State {
     hr_max: String,
     hr_rest: String,
     zones: [String; 5],
-    export_what: What,
     confirm_restore: bool,
     restore_src: Option<std::path::PathBuf>,
     restore_info: String,
-}
-
-impl Default for State {
-    fn default() -> Self {
-        State {
-            loaded: false,
-            age: String::new(),
-            weight: String::new(),
-            height: String::new(),
-            hr_max: String::new(),
-            hr_rest: String::new(),
-            zones: Default::default(),
-            export_what: What::All,
-            confirm_restore: false,
-            restore_src: None,
-            restore_info: String::new(),
-        }
-    }
 }
 
 fn opt(v: Option<f64>) -> String {
@@ -216,6 +197,13 @@ fn appearance(app: &mut App, ui: &mut Ui) {
     ui.horizontal(|ui| {
         ui.label(tr!("Tema:", "Theme:"));
         let mut changed = ui
+            .selectable_value(
+                &mut app.settings.theme,
+                Theme::System,
+                tr!("Automático (Windows)", "Automatic (Windows)"),
+            )
+            .changed();
+        changed |= ui
             .selectable_value(&mut app.settings.theme, Theme::Dark, tr!("Escuro", "Dark"))
             .changed();
         changed |= ui
@@ -362,42 +350,16 @@ fn data(app: &mut App, ui: &mut Ui) {
                 }
             }
     });
-    ui.add_space(6.0);
-    ui.horizontal_wrapped(|ui| {
-        ui.label(tr!("Exportar:", "Export:"));
-        let s = &mut app.pages.settings;
-        egui::ComboBox::from_id_salt("export")
-            .selected_text(s.export_what.label())
-            .show_ui(ui, |ui| {
-                for w in What::ALL {
-                    ui.selectable_value(&mut s.export_what, w, w.label());
-                }
-            });
-        let what = s.export_what;
-        for (label, ext) in [("CSV", "csv"), ("JSON", "json")] {
-            if ui.button(format!("⬇ {label}")).clicked()
-                && let Some(dest) = rfd::FileDialog::new()
-                    .set_file_name(format!(
-                        "{}-{}.{ext}",
-                        what.file_stem(),
-                        chrono::Local::now().format("%Y-%m-%d")
-                    ))
-                    .add_filter(label, &[ext])
-                    .save_file()
-            {
-                let table = export::build(&app.db, what, &app.data.activities, &app.data.metrics);
-                let text = if ext == "csv" {
-                    export::to_csv(&table)
-                } else {
-                    export::to_json(&table)
-                };
-                match std::fs::write(&dest, text) {
-                    Ok(()) => app.toast(trf!("{} linhas exportadas.", "{} rows exported.", table.rows.len())),
-                    Err(e) => app.toast_error(e.to_string()),
-                }
-            }
-        }
-    });
+    ui.label(
+        weak(
+            ui,
+            tr!(
+                "Relatórios e exportação em CSV/JSON ficam na página Relatórios.",
+                "Reports and CSV/JSON export are on the Reports page."
+            ),
+        )
+        .small(),
+    );
 }
 
 fn restore(app: &mut App, src: &std::path::Path) {

@@ -1,6 +1,6 @@
 //! Updates through GitHub Releases, with no server of our own.
 //!
-//! - Unobtrusive check: 30 s after opening and then once a day, the app
+//! - Unobtrusive check: right after opening and then once a day, the app
 //!   queries `releases/latest` on the public GitHub API (which ignores
 //!   pre-releases). Failures are silent. Nothing is sent besides the
 //!   request itself (GitHub sees the IP and the version in the User-Agent).
@@ -27,7 +27,8 @@ pub const REPOSITORIO: &str = "Antxj/FitLedger";
 pub const VERSAO_ATUAL: &str = env!("CARGO_PKG_VERSION");
 /// Name of the release asset that contains the app.
 const ARQUIVO: &str = "FitLedger.exe";
-const PRIMEIRA_VERIFICACAO: Duration = Duration::from_secs(30);
+/// First check right after opening (a moment for the window to appear first).
+const PRIMEIRA_VERIFICACAO: Duration = Duration::from_secs(3);
 const INTERVALO: Duration = Duration::from_secs(24 * 60 * 60);
 const LIMITE_JSON: usize = 2 * 1024 * 1024;
 const LIMITE_EXE: usize = 64 * 1024 * 1024;

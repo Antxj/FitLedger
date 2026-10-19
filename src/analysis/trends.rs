@@ -1,10 +1,10 @@
 //! Analyses across activities: pace × heart rate (item 8), period buckets
 //! for the Progress page (item 24) and comparability (item 39).
 
-use super::load::{day_of, week_start};
 use super::metrics::{Metrics, Terrain};
+use crate::coach::fitness::day as day_of;
 use crate::model::{Activity, Modality};
-use chrono::{Duration, NaiveDate};
+use chrono::NaiveDate;
 use std::collections::{BTreeMap, HashMap};
 
 /// Width of the pace bands, s/km.
@@ -106,17 +106,6 @@ pub fn hr_at_pace<'a>(
     out
 }
 
-/// Average pace of the steady stretches with HR inside [lo, hi].
-pub fn pace_in_hr_band(m: &Metrics, lo: f64, hi: f64) -> Option<(f64, usize)> {
-    let pts: Vec<f64> = m
-        .pace_hr
-        .iter()
-        .filter(|p| p[1] >= lo && p[1] <= hi)
-        .map(|p| p[0])
-        .collect();
-    (pts.len() >= 3).then(|| (pts.iter().sum::<f64>() / pts.len() as f64, pts.len()))
-}
-
 /// Most common pace band of the steady stretches (the default of the pace × HR page).
 pub fn typical_pace(bands: &[PaceBand]) -> Option<f64> {
     bands.iter().max_by_key(|b| b.minutes).map(|b| b.pace + PACE_BIN / 2.0)
@@ -193,110 +182,6 @@ pub fn comparability_notes(acts: &[&Activity], metrics: &HashMap<i64, Metrics>) 
         }
     }
     notes
-}
-
-// ------------------------------------------------------- Progress buckets --
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Bucket {
-    Day,
-    Week,
-    Month,
-}
-
-pub fn bucket_start(d: NaiveDate, b: Bucket) -> NaiveDate {
-    use chrono::Datelike;
-    match b {
-        Bucket::Day => d,
-        Bucket::Week => week_start(d),
-        Bucket::Month => d.with_day(1).unwrap_or(d),
-    }
-}
-
-/// Totals per bucket, for the Progress charts.
-#[derive(Debug, Clone, Default, PartialEq)]
-pub struct Totals {
-    pub run_km: f64,
-    pub hours: f64,
-    pub run_s: f64,
-    pub run_m: f64,
-    pub run_hr_sum: f64,
-    pub run_hr_n: f64,
-    pub longest_km: f64,
-    pub strength_volume: f64,
-    pub strength_sessions: f64,
-    pub tennis_h: f64,
-    pub load: f64,
-    pub sessions: f64,
-}
-
-impl Totals {
-    pub fn avg_pace(&self) -> Option<f64> {
-        (self.run_m > 100.0).then(|| self.run_s / (self.run_m / 1000.0))
-    }
-
-    pub fn avg_hr(&self) -> Option<f64> {
-        (self.run_hr_n > 0.0).then(|| self.run_hr_sum / self.run_hr_n)
-    }
-}
-
-pub fn buckets(
-    acts: &[Activity],
-    metrics: &HashMap<i64, Metrics>,
-    strength_volume: &HashMap<i64, f64>,
-    from: Option<NaiveDate>,
-    to: NaiveDate,
-    b: Bucket,
-) -> BTreeMap<NaiveDate, Totals> {
-    let mut out: BTreeMap<NaiveDate, Totals> = BTreeMap::new();
-    // empty buckets too, so the charts show the gaps
-    if let Some(f) = from {
-        let mut d = bucket_start(f, b);
-        while d <= to {
-            out.entry(d).or_default();
-            d = match b {
-                Bucket::Day => d + Duration::days(1),
-                Bucket::Week => d + Duration::days(7),
-                Bucket::Month => {
-                    use chrono::Months;
-                    d.checked_add_months(Months::new(1)).unwrap_or(to + Duration::days(1))
-                }
-            };
-        }
-    }
-    for a in acts {
-        let day = day_of(a);
-        if from.is_some_and(|f| day < f) || day > to {
-            continue;
-        }
-        let t = out.entry(bucket_start(day, b)).or_default();
-        let dur = a.duration().unwrap_or(0.0);
-        t.hours += dur / 3600.0;
-        t.sessions += 1.0;
-        t.load += super::load::activity_load(a, metrics.get(&a.id));
-        match a.modality {
-            Modality::RoadRun | Modality::Treadmill => {
-                let d = a.distance().unwrap_or(0.0);
-                t.run_km += d / 1000.0;
-                if d > 100.0 {
-                    t.run_m += d;
-                    t.run_s += dur;
-                }
-                t.longest_km = t.longest_km.max(d / 1000.0);
-                if let Some(h) = a.avg_hr {
-                    t.run_hr_sum += h * dur;
-                    t.run_hr_n += dur;
-                }
-            }
-            Modality::Tennis => t.tennis_h += dur / 3600.0,
-            Modality::Strength => {
-                t.strength_sessions += 1.0;
-                t.strength_volume += strength_volume.get(&a.id).copied().unwrap_or(0.0);
-            }
-            Modality::Other => {}
-        }
-    }
-    out
 }
 
 #[cfg(test)]

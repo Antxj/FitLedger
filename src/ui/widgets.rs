@@ -38,8 +38,6 @@ pub fn modality_color(m: Modality) -> Color32 {
     match m {
         Modality::RoadRun => Color32::from_rgb(0x3b, 0x82, 0xf6),
         Modality::Treadmill => Color32::from_rgb(0x06, 0xb6, 0xd4),
-        Modality::Tennis => Color32::from_rgb(0x84, 0xcc, 0x16),
-        Modality::Strength => Color32::from_rgb(0xa8, 0x55, 0xf7),
         Modality::Other => Color32::from_rgb(0x94, 0xa3, 0xb8),
     }
 }

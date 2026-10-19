@@ -5,28 +5,19 @@
 pub enum Modality {
     RoadRun,
     Treadmill,
-    Tennis,
-    Strength,
+    /// Not a run (kept only if imported by an older version; hidden).
     #[default]
     Other,
 }
 
 impl Modality {
-    pub const ALL: [Modality; 5] = [
-        Modality::RoadRun,
-        Modality::Treadmill,
-        Modality::Tennis,
-        Modality::Strength,
-        Modality::Other,
-    ];
+    pub const ALL: [Modality; 3] = [Modality::RoadRun, Modality::Treadmill, Modality::Other];
 
     /// Code stored in the database (never translated).
     pub fn code(self) -> &'static str {
         match self {
             Modality::RoadRun => "road_run",
             Modality::Treadmill => "treadmill",
-            Modality::Tennis => "tennis",
-            Modality::Strength => "strength",
             Modality::Other => "other",
         }
     }
@@ -42,8 +33,6 @@ impl Modality {
         match self {
             Modality::RoadRun => tr!("Corrida de rua", "Road run"),
             Modality::Treadmill => tr!("Esteira", "Treadmill"),
-            Modality::Tennis => tr!("Tênis", "Tennis"),
-            Modality::Strength => tr!("Musculação", "Strength"),
             Modality::Other => tr!("Outras", "Other"),
         }
     }

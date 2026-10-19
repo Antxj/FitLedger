@@ -23,21 +23,6 @@ pub fn num_trim(v: f64, decimals: usize) -> String {
     }
 }
 
-/// Integer with thousands separator: "51.322" (pt) / "51,322" (en).
-pub fn int(v: f64) -> String {
-    let n = v.round() as i64;
-    let digits = n.unsigned_abs().to_string();
-    let sep = if crate::i18n::pt() { '.' } else { ',' };
-    let mut out = String::new();
-    for (i, c) in digits.chars().enumerate() {
-        if i > 0 && (digits.len() - i).is_multiple_of(3) {
-            out.push(sep);
-        }
-        out.push(c);
-    }
-    if n < 0 { format!("-{out}") } else { out }
-}
-
 pub fn km(meters: f64) -> String {
     format!("{} km", num(meters / 1000.0, 2))
 }
@@ -179,50 +164,6 @@ pub fn weekday_short(d: NaiveDate) -> &'static str {
     }
 }
 
-pub fn month_name(month: u32) -> &'static str {
-    let i = (month.clamp(1, 12) - 1) as usize;
-    if crate::i18n::pt() {
-        [
-            "Janeiro",
-            "Fevereiro",
-            "Março",
-            "Abril",
-            "Maio",
-            "Junho",
-            "Julho",
-            "Agosto",
-            "Setembro",
-            "Outubro",
-            "Novembro",
-            "Dezembro",
-        ][i]
-    } else {
-        [
-            "January",
-            "February",
-            "March",
-            "April",
-            "May",
-            "June",
-            "July",
-            "August",
-            "September",
-            "October",
-            "November",
-            "December",
-        ][i]
-    }
-}
-
-/// "1 sessão" / "3 sessões".
-pub fn sessions(n: usize) -> String {
-    if n == 1 {
-        tr!("1 sessão", "1 session").into()
-    } else {
-        trf!("{n} sessões", "{n} sessions")
-    }
-}
-
 /// Signed percentage: "+8%" / "-3%".
 pub fn pct_signed(v: f64) -> String {
     format!("{}{}%", if v > 0.0 { "+" } else { "" }, num(v, 0))
@@ -263,9 +204,6 @@ mod tests {
         assert_eq!(num_trim(10.0, 2), "10");
         assert_eq!(num_trim(10.5, 2), "10,5");
         assert_eq!(pct_signed(8.0), "+8%");
-        assert_eq!(int(51322.4), "51.322");
-        assert_eq!(int(999.0), "999");
-        assert_eq!(int(-1234567.0), "-1.234.567");
     }
 
     #[test]

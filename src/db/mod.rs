@@ -368,22 +368,6 @@ impl Db {
         rows.collect()
     }
 
-    pub fn fit_sets(&self, activity_id: i64) -> Result<Vec<crate::model::StrengthSet>> {
-        let mut st = self.conn.prepare_cached(
-            "SELECT t, duration_s, reps, weight_kg, category FROM fit_set WHERE activity_id = ?1 ORDER BY idx",
-        )?;
-        let rows = st.query_map([activity_id], |r| {
-            Ok(crate::model::StrengthSet {
-                t: r.get(0)?,
-                duration_s: r.get(1)?,
-                reps: r.get(2)?,
-                weight_kg: r.get(3)?,
-                category: r.get(4)?,
-            })
-        })?;
-        rows.collect()
-    }
-
     /// Saves the user-editable fields of an activity.
     pub fn update_activity_user_fields(&self, a: &Activity) -> Result<()> {
         self.conn.execute(
@@ -409,68 +393,6 @@ impl Db {
         Ok(())
     }
 
-    /// Manual activity (no FIT file) or edit of one. Returns the id.
-    pub fn save_manual_activity(&self, a: &Activity) -> Result<i64> {
-        let ts = now();
-        if a.id == 0 {
-            self.conn.execute(
-                "INSERT INTO activity(source, start_time, tz_offset, modality, name, elapsed_s, timer_s,
-                    distance_m, calories, avg_hr, max_hr, incline_pct, notes, rpe, sleep_quality, fatigue,
-                    soreness, body_weight, created_at, updated_at)
-                 VALUES('manual',?1,?2,?3,?4,?5,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?17)",
-                params![
-                    a.start_time,
-                    a.tz_offset,
-                    a.modality.code(),
-                    a.name,
-                    a.elapsed_s,
-                    a.distance_m,
-                    a.calories,
-                    a.avg_hr,
-                    a.max_hr,
-                    a.incline_pct,
-                    a.notes,
-                    a.rpe,
-                    a.sleep_quality,
-                    a.fatigue,
-                    a.soreness,
-                    a.body_weight,
-                    ts
-                ],
-            )?;
-            Ok(self.conn.last_insert_rowid())
-        } else {
-            self.conn.execute(
-                "UPDATE activity SET start_time = ?2, tz_offset = ?3, modality = ?4, name = ?5,
-                    elapsed_s = ?6, timer_s = ?6, distance_m = ?7, calories = ?8, avg_hr = ?9, max_hr = ?10,
-                    incline_pct = ?11, notes = ?12, rpe = ?13, sleep_quality = ?14, fatigue = ?15,
-                    soreness = ?16, body_weight = ?17, updated_at = ?18
-                 WHERE id = ?1 AND source = 'manual'",
-                params![
-                    a.id,
-                    a.start_time,
-                    a.tz_offset,
-                    a.modality.code(),
-                    a.name,
-                    a.elapsed_s,
-                    a.distance_m,
-                    a.calories,
-                    a.avg_hr,
-                    a.max_hr,
-                    a.incline_pct,
-                    a.notes,
-                    a.rpe,
-                    a.sleep_quality,
-                    a.fatigue,
-                    a.soreness,
-                    a.body_weight,
-                    ts
-                ],
-            )?;
-            Ok(a.id)
-        }
-    }
-
     /// Deletes an activity. The original FIT file is deleted too, so that it
     /// can be imported again from /fits if the user changes their mind
     /// (the file on disk is never touched).
@@ -489,6 +411,23 @@ impl Db {
             tx.execute("DELETE FROM fit_file WHERE id = ?1", [f])?;
         }
         tx.commit()
+    }
+
+    /// Best efforts per activity: id → [(distance, time)].
+    pub fn best_efforts(&self) -> std::collections::HashMap<i64, Vec<(f64, f64)>> {
+        let mut out: std::collections::HashMap<i64, Vec<(f64, f64)>> = Default::default();
+        if let Ok(mut st) = self
+            .conn
+            .prepare("SELECT activity_id, distance_m, time_s FROM best_effort")
+            && let Ok(rows) = st.query_map([], |r| {
+                Ok((r.get::<_, i64>(0)?, r.get::<_, f64>(1)?, r.get::<_, f64>(2)?))
+            })
+        {
+            for (id, d, t) in rows.flatten() {
+                out.entry(id).or_default().push((d, t));
+            }
+        }
+        out
     }
 
     /// Highest heart rate in all activities (to estimate the max HR).
@@ -595,6 +534,39 @@ mod tests {
         };
         db.save_settings(&s).unwrap();
         assert_eq!(db.load_settings(), s);
+    }
+
+    #[test]
+    fn version_1_database_migrates_to_the_coach_schema() {
+        let dir = std::env::temp_dir().join(format!("fitledger-mig-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("old.db");
+        {
+            // a database as written by FitLedger 0.1
+            let c = Connection::open(&path).unwrap();
+            c.execute_batch(schema::MIGRATIONS[0]).unwrap();
+            c.pragma_update(None, "user_version", 1).unwrap();
+            c.execute(
+                "INSERT INTO activity(source, start_time, modality, created_at, updated_at) VALUES('fit', 1, 'road_run', 0, 0)",
+                [],
+            )
+            .unwrap();
+            c.execute("INSERT INTO plan(name, created_at) VALUES('old plan', 0)", [])
+                .unwrap();
+        }
+        let backups = dir.join("backups");
+        let db = Db::open(&path, Some(&backups)).unwrap();
+        assert_eq!(db.version().unwrap(), schema::latest_version());
+        assert_eq!(db.activities().unwrap().len(), 1, "runs are kept");
+        assert!(db.active_goal().unwrap().is_none());
+        assert_eq!(
+            std::fs::read_dir(&backups).unwrap().count(),
+            1,
+            "backup before migrating"
+        );
+        drop(db);
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     #[test]

@@ -4,10 +4,10 @@
 use super::charts::{self, Axis, ChartOpts, Series};
 use super::widgets::{self, weak};
 use super::{App, Page};
-use crate::analysis::load::day_of;
 use crate::analysis::metrics::{self, Terrain};
 use crate::analysis::stream::Stream;
 use crate::analysis::trends;
+use crate::coach::fitness::day as day_of;
 use crate::format;
 use crate::model::Activity;
 use eframe::egui::{self, RichText, Ui};

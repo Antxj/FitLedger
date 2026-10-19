@@ -237,6 +237,49 @@ CREATE TABLE goal(
     created_at   INTEGER NOT NULL
 );
 "#,
+    // v2 -------------------------------------------------------------------
+    // FitLedger 0.2 becomes a running coach: manual plans, generic goals,
+    // tennis and strength tables go away (a backup is saved before migrating).
+    r#"
+DROP TABLE IF EXISTS strength_set;
+DROP TABLE IF EXISTS exercise;
+DROP TABLE IF EXISTS planned_workout;
+DROP TABLE IF EXISTS plan;
+DROP TABLE IF EXISTS reference_test_run;
+DROP TABLE IF EXISTS reference_test;
+DROP TABLE IF EXISTS goal;
+DROP TABLE IF EXISTS objective;
+
+-- One row per goal version; only one is active.
+CREATE TABLE coach_goal(
+    id          INTEGER PRIMARY KEY,
+    created_at  INTEGER NOT NULL,
+    active      INTEGER NOT NULL DEFAULT 1,
+    json        TEXT NOT NULL,
+    achieved_on TEXT,
+    achieved_by INTEGER REFERENCES activity(id) ON DELETE SET NULL
+);
+
+-- Generated sessions. Future ones are rebuilt; past ones keep their result.
+CREATE TABLE coach_session(
+    id          INTEGER PRIMARY KEY,
+    goal_id     INTEGER NOT NULL REFERENCES coach_goal(id) ON DELETE CASCADE,
+    date        TEXT NOT NULL,
+    json        TEXT NOT NULL,
+    status      TEXT NOT NULL,
+    activity_id INTEGER REFERENCES activity(id) ON DELETE SET NULL
+);
+CREATE INDEX coach_session_goal_date ON coach_session(goal_id, date);
+
+-- What the coach noticed and changed, with the data behind it.
+CREATE TABLE coach_log(
+    id       INTEGER PRIMARY KEY,
+    at       INTEGER NOT NULL,
+    goal_id  INTEGER REFERENCES coach_goal(id) ON DELETE CASCADE,
+    notes    TEXT NOT NULL,
+    evidence TEXT NOT NULL
+);
+"#,
 ];
 
 pub fn latest_version() -> i64 {

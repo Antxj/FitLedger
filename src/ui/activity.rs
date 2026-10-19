@@ -22,7 +22,6 @@ pub enum Tab {
     Zones,
     Drift,
     Map,
-    Exercises,
     Notes,
     Quality,
 }
@@ -42,7 +41,6 @@ pub struct State {
     drift_skip_min: f64,
     edit: Option<Edit>,
     confirm_delete: bool,
-    ref_tests: Vec<(i64, String, bool)>,
 }
 
 /// Text buffers of the notes/edit form.
@@ -76,13 +74,11 @@ fn load(app: &mut App, id: i64) {
     let Some(a) = app.data.get(id).cloned() else { return };
     let stream = metrics::stream_for(&app.db, &a).unwrap_or_default();
     let laps = app.db.laps(id).unwrap_or_default();
-    let ref_tests = app.db.reference_tests_for_activity(id).unwrap_or_default();
     let st = &mut app.pages.activity;
     st.id = id;
     st.generation = app.data.generation;
     st.stream = Some(stream);
     st.laps = laps;
-    st.ref_tests = ref_tests;
     st.edit = Some(Edit::new(&a));
     if !keep_tab {
         st.tab = st.open_tab.take().unwrap_or(Tab::Charts);
@@ -131,9 +127,6 @@ pub fn show(app: &mut App, ui: &mut Ui, id: i64) {
     if has_gps {
         tabs.push((Tab::Map, tr!("Percurso", "Route")));
     }
-    if a.modality == Modality::Strength {
-        tabs.insert(0, (Tab::Exercises, tr!("Exercícios", "Exercises")));
-    }
     tabs.push((Tab::Notes, tr!("Notas e ajustes", "Notes and edits")));
     tabs.push((Tab::Quality, tr!("Dados e arquivo", "Data and file")));
     if !tabs.iter().any(|(t, _)| *t == app.pages.activity.tab) {
@@ -155,26 +148,6 @@ pub fn show(app: &mut App, ui: &mut Ui, id: i64) {
             Tab::Zones => zones_tab(ui, &m),
             Tab::Drift => drift_tab(app, ui),
             Tab::Map => map_tab(app, ui),
-            Tab::Exercises => {
-                super::strength::sets_tab(app, ui, a.id);
-                let watch = app.db.fit_sets(a.id).unwrap_or_default();
-                if !watch.is_empty() {
-                    widgets::section(ui, tr!("Séries registradas pelo relógio", "Sets recorded by the watch"));
-                    for (i, s) in watch.iter().enumerate() {
-                        ui.label(format!(
-                            "{}. {} {} {}",
-                            i + 1,
-                            s.reps.map(|r| trf!("{r} reps", "{r} reps")).unwrap_or_default(),
-                            s.weight_kg
-                                .map(|w| format!("× {} kg", format::num_trim(w, 1)))
-                                .unwrap_or_default(),
-                            s.duration_s
-                                .map(|d| format!("· {}", format::duration(d)))
-                                .unwrap_or_default()
-                        ));
-                    }
-                }
-            }
             Tab::Notes => notes_tab(app, ui, &a),
             Tab::Quality => {
                 quality_tab(ui, &m);
@@ -219,10 +192,6 @@ fn header(app: &mut App, ui: &mut Ui, a: &Activity) {
             {
                 app.pages.activity.confirm_delete = true;
             }
-            if a.source == "manual" && ui.button(tr!("✏ Editar", "✏ Edit")).clicked() {
-                app.pages.manual = super::manual::State::default();
-                app.go(Page::Manual(Some(a.id)));
-            }
             if ui.button(tr!("⚖ Comparar com…", "⚖ Compare with…")).clicked() {
                 if !app.pages.activities.selected.contains(&a.id) {
                     app.pages.activities.selected.push(a.id);
@@ -265,9 +234,12 @@ fn summary_cards(ui: &mut Ui, a: &Activity, m: &Metrics) {
             .map(|mv| trf!("em movimento {}", "moving {}", format::duration(mv))),
     ));
     if a.modality.is_run() {
+        // the watch's average speed, else the one implied by the pace
         let kmh = a
-            .pace_s_per_km()
-            .map(|p| format!("{} km/h", format::num(format::pace_to_kmh(p), 1)));
+            .avg_speed
+            .map(|v| v * 3.6)
+            .or_else(|| a.pace_s_per_km().map(format::pace_to_kmh))
+            .map(|v| format!("{} km/h", format::num(v, 1)));
         cards.push((
             tr!("Pace médio", "Avg pace").into(),
             format::opt_pace(a.pace_s_per_km()),
@@ -934,7 +906,6 @@ fn map_tab(app: &mut App, ui: &mut Ui) {
 }
 
 fn notes_tab(app: &mut App, ui: &mut Ui, a: &Activity) {
-    let tests = app.pages.activity.ref_tests.clone();
     let Some(e) = app.pages.activity.edit.as_mut() else {
         return;
     };
@@ -1030,37 +1001,6 @@ fn notes_tab(app: &mut App, ui: &mut Ui, a: &Activity) {
     ui.add_space(8.0);
     if ui.button(RichText::new(tr!("💾 Salvar", "💾 Save")).strong()).clicked() {
         save = true;
-    }
-
-    if a.modality.is_run() {
-        widgets::section(ui, tr!("Teste de referência", "Reference test"));
-        if tests.is_empty() {
-            ui.label(weak(
-                ui,
-                tr!(
-                    "Nenhum teste criado. Crie em Análises → Testes de referência.",
-                    "No test created yet. Create one in Analysis → Reference tests."
-                ),
-            ));
-        }
-        for (tid, name, on) in &tests {
-            let mut v = *on;
-            if ui
-                .checkbox(
-                    &mut v,
-                    trf!(
-                        "Esta corrida é uma execução de \"{name}\"",
-                        "This run is an execution of \"{name}\""
-                    ),
-                )
-                .changed()
-            {
-                if let Err(err) = app.db.set_reference_run(*tid, a.id, v) {
-                    app.toast_error(err.to_string());
-                }
-                app.pages.activity.generation = 0;
-            }
-        }
     }
 
     if save {
