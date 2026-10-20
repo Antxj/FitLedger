@@ -1,6 +1,6 @@
 [package]
 name = "fitledger"
-version = "0.2.0"
+version = "0.2.1"
 edition = "2024"
 rust-version = "1.95"
 description = "A running coach for Windows that builds and adapts your training plan from your watch's FIT files"
