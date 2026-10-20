@@ -15,7 +15,7 @@ Tell it your goal. It builds your training plan — and rebuilds it after every 
 ## Run lower. Run longer. Run faster.
 
 Whether you want to **run 5 km for the first time**, **finish 10 km in under an hour**, or
-**run at the same pace with a lower heart rate**, FitLedger turns that goal into a week-by-week
+**run at the same pace with a lower heart rate**, for goals **up to 10 km**, FitLedger turns that goal into a week-by-week
 schedule built for *you* — from the runs your watch already records.
 
 - **Set a goal in seconds.** Distance, and optionally a finish time, a maximum average heart rate,

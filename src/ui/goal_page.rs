@@ -7,6 +7,10 @@ use crate::coach::{Goal, Surface};
 use crate::format;
 use eframe::egui::{self, RichText, Ui};
 
+/// Longest goal distance. The coach's rules (long run up to the goal
+/// distance, one taper week) are meant for distances up to 10 km.
+pub const MAX_KM: f64 = 10.0;
+
 /// Text buffers of the goal form.
 pub struct Form {
     pub g: Goal,
@@ -37,8 +41,14 @@ impl Form {
     /// Validates the buffers into the goal.
     fn apply(&mut self) -> bool {
         self.error = None;
-        let Some(km) = format::parse_num(&self.distance).filter(|v| (0.4..=100.0).contains(v)) else {
-            self.error = Some(tr!("Informe a distância (em km).", "Enter the distance (in km).").into());
+        let Some(km) = format::parse_num(&self.distance).filter(|v| (0.4..=MAX_KM).contains(v)) else {
+            self.error = Some(
+                tr!(
+                    "Informe a distância, de 0,4 a 10 km. O treinador foi pensado para metas de até 10 km.",
+                    "Enter the distance, from 0.4 to 10 km. The coach is designed for goals up to 10 km."
+                )
+                .into(),
+            );
             return false;
         };
         self.g.distance_m = km * 1000.0;
@@ -97,7 +107,7 @@ pub fn form(ui: &mut Ui, f: &mut Form, save_label: &str) -> Option<Goal> {
             ui.horizontal(|ui| {
                 ui.add(egui::TextEdit::singleline(&mut f.distance).desired_width(70.0));
                 ui.label("km");
-                for km in ["3", "5", "10", "21,1"] {
+                for km in ["3", "5", "8", "10"] {
                     if ui.small_button(format!("{km} km")).clicked() {
                         f.distance = km.into();
                     }
@@ -318,4 +328,22 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             });
         }
     });
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn goal_distance_is_limited_to_10_km() {
+        let mut f = Form::new(Goal::default());
+        f.distance = "10".into();
+        assert!(f.apply());
+        assert_eq!(f.g.distance_m, 10_000.0);
+        for bad in ["10,5", "21,1", "42", "0", "abc"] {
+            f.distance = bad.into();
+            assert!(!f.apply(), "{bad}");
+            assert!(f.error.is_some());
+        }
+    }
 }

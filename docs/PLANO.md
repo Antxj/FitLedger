@@ -11,7 +11,7 @@ O objetivo do usuário é:
 
 ## 1. Como funciona
 
-1. O usuário define a **meta**: distância (obrigatória), tempo (opcional), FC média máxima (opcional,
+1. O usuário define a **meta**: distância (obrigatória, **até 10 km**, porque as regras do plano foram feitas para essas distâncias), tempo (opcional), FC média máxima (opcional,
    com o pace de referência), dias por semana, dias preferidos, dia do longão, superfície e data alvo
    (opcional).
 2. O **treinador** gera o cronograma até a data alvo, ou até a data estimada.
