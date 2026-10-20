@@ -147,6 +147,15 @@ fn profile(app: &mut App, ui: &mut Ui) -> bool {
                 ui.end_row();
             };
             field(ui, tr!("Idade", "Age"), &mut s.age, tr!("anos", "years"), "");
+            ui.label(tr!("Sexo", "Sex"));
+            ui.horizontal(|ui| {
+                let sex = &mut app.settings.sex;
+                ui.selectable_value(sex, Some(crate::settings::Sex::Male), tr!("Masculino", "Male"));
+                ui.selectable_value(sex, Some(crate::settings::Sex::Female), tr!("Feminino", "Female"));
+                ui.selectable_value(sex, None, tr!("Não informar", "Prefer not to say"));
+                ui.label(weak(ui, tr!("só para a carga de treino", "only for training load")).small());
+            });
+            ui.end_row();
             field(
                 ui,
                 tr!("FC máxima", "Max HR"),
@@ -159,7 +168,10 @@ fn profile(app: &mut App, ui: &mut Ui) -> bool {
                 tr!("FC de repouso", "Resting HR"),
                 &mut s.hr_rest,
                 "bpm",
-                tr!("ao acordar", "on waking up"),
+                tr!(
+                    "ao acordar, deitado, antes de levantar (o relógio costuma mostrar)",
+                    "on waking up, lying down, before getting up (watches usually show it)"
+                ),
             );
             field(
                 ui,

@@ -79,9 +79,11 @@ pub fn cardiac_drift(st: &Stream, skip_s: f64) -> Option<Drift> {
     })
 }
 
-/// Banister TRIMP: minutes × HRr × 0.64 × e^(1.92 × HRr).
-/// HRr = (HR − rest) / (max − rest).
-pub fn trimp(st: &Stream, hr_rest: f64, hr_max: f64) -> Option<f64> {
+/// Banister TRIMP: minutes × HRr × k × e^(b × HRr), HRr = (HR − rest) / (max − rest).
+/// Men: k = 0.64, b = 1.92; women: k = 0.86, b = 1.67 (also used when unknown:
+/// men's coefficients).
+pub fn trimp(st: &Stream, hr_rest: f64, hr_max: f64, female: bool) -> Option<f64> {
+    let (k, b) = if female { (0.86, 1.67) } else { (0.64, 1.92) };
     if hr_max <= hr_rest + 20.0 {
         return None;
     }
@@ -90,7 +92,7 @@ pub fn trimp(st: &Stream, hr_rest: f64, hr_max: f64) -> Option<f64> {
     for i in 0..st.len() {
         if let Some(h) = st.hr[i] {
             let r = ((h - hr_rest) / (hr_max - hr_rest)).clamp(0.0, 1.1);
-            total += st.dt[i] / 60.0 * r * 0.64 * (1.92 * r).exp();
+            total += st.dt[i] / 60.0 * r * k * (b * r).exp();
             seen += st.dt[i];
         }
     }
@@ -222,9 +224,12 @@ mod tests {
         let easy = run(1801, |_| 2.5, |_| 130.0);
         let hard = run(1801, |_| 3.2, |_| 175.0);
         let long = run(3601, |_| 2.5, |_| 130.0);
-        let e = trimp(&easy, 60.0, 190.0).unwrap();
-        let h = trimp(&hard, 60.0, 190.0).unwrap();
-        let l = trimp(&long, 60.0, 190.0).unwrap();
+        let e = trimp(&easy, 60.0, 190.0, false).unwrap();
+        let h = trimp(&hard, 60.0, 190.0, false).unwrap();
+        let l = trimp(&long, 60.0, 190.0, false).unwrap();
+        // the women's curve gives a different (not wildly different) load
+        let hf = trimp(&hard, 60.0, 190.0, true).unwrap();
+        assert!((hf / h - 1.0).abs() < 0.2, "{hf} vs {h}");
         assert!(h > e * 1.8, "{e} {h}");
         assert!((l / e - 2.0).abs() < 0.01);
         // 30 min at HRr ≈ 0.885 → ≈ 93

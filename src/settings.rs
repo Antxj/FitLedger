@@ -12,6 +12,15 @@ pub enum Theme {
     Light,
 }
 
+/// Only used for the training-load formula (Banister's TRIMP has different
+/// coefficients for men and women). Zones and the plan do not depend on it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Sex {
+    Male,
+    Female,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
 #[serde(rename_all = "snake_case")]
 pub enum ZoneMethod {
@@ -33,6 +42,7 @@ pub struct Settings {
     pub age: Option<u32>,
     pub weight_kg: Option<f64>,
     pub height_cm: Option<f64>,
+    pub sex: Option<Sex>,
     /// None: estimated from age (or from the highest value seen).
     pub hr_max: Option<f64>,
     pub hr_rest: Option<f64>,
@@ -54,6 +64,7 @@ impl Default for Settings {
             age: None,
             weight_kg: None,
             height_cm: None,
+            sex: None,
             hr_max: None,
             hr_rest: None,
             zone_method: ZoneMethod::Reserve,

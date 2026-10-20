@@ -66,6 +66,7 @@ fn profile(app: &mut App, ui: &mut Ui) {
     widgets::section(ui, tr!("Dados pessoais (opcionais)", "Personal data (optional)"));
     let s = &mut app.pages.settings;
     let mut changed = false;
+    let mut sex_changed = false;
     egui::Grid::new("profile")
         .num_columns(2)
         .spacing([12.0, 6.0])
@@ -79,6 +80,21 @@ fn profile(app: &mut App, ui: &mut Ui) {
                 ui.end_row();
             };
             field(ui, tr!("Idade", "Age"), &mut s.age, tr!("anos", "years"));
+            ui.label(tr!("Sexo", "Sex"));
+            ui.horizontal(|ui| {
+                let sex = &mut app.settings.sex;
+                sex_changed |= ui
+                    .selectable_value(sex, Some(crate::settings::Sex::Male), tr!("Masculino", "Male"))
+                    .changed();
+                sex_changed |= ui
+                    .selectable_value(sex, Some(crate::settings::Sex::Female), tr!("Feminino", "Female"))
+                    .changed();
+                sex_changed |= ui
+                    .selectable_value(sex, None, tr!("Não informar", "Prefer not to say"))
+                    .changed();
+                ui.label(weak(ui, tr!("só afeta a carga de treino", "only affects training load")).small());
+            });
+            ui.end_row();
             field(ui, tr!("Peso", "Weight"), &mut s.weight, "kg");
             field(ui, tr!("Altura", "Height"), &mut s.height, "cm");
         });
@@ -88,6 +104,9 @@ fn profile(app: &mut App, ui: &mut Ui) {
             .map(|v| v as u32);
         app.settings.weight_kg = format::parse_num(&s.weight).filter(|v| *v > 20.0);
         app.settings.height_cm = format::parse_num(&s.height).filter(|v| *v > 80.0);
+        app.save_settings();
+    }
+    if sex_changed && !changed {
         app.save_settings();
     }
 }
@@ -126,8 +145,8 @@ fn heart_rate(app: &mut App, ui: &mut Ui) {
                 ui.label(weak(
                     ui,
                     tr!(
-                        "usada na carga (TRIMP) e nas zonas por reserva",
-                        "used for load (TRIMP) and reserve zones"
+                        "medida ao acordar, deitado, antes de levantar; usada nas zonas e na carga",
+                        "measured on waking up, lying down, before getting up; used for zones and load"
                     ),
                 ));
             });

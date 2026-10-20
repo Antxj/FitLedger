@@ -64,8 +64,8 @@ pub const BASIS: &[Basis] = &[
     Basis {
         topic_pt: "Carga de treino (TRIMP)",
         topic_en: "Training load (TRIMP)",
-        use_pt: "A carga de cada corrida combina duração e intensidade pela FC.",
-        use_en: "Each run's load combines duration and heart-rate intensity.",
+        use_pt: "A carga de cada corrida combina duração e intensidade pela FC, com os coeficientes de Banister para homens ou mulheres (o sexo é opcional e só afeta a carga).",
+        use_en: "Each run's load combines duration and heart-rate intensity, with Banister's coefficients for men or women (sex is optional and only affects load).",
         reference: "Banister EW. Modeling elite athletic performance. In: MacDougall JD, Wenger HA, Green HJ, eds. Physiological Testing of the High-Performance Athlete. Human Kinetics; 1991:403–424.",
     },
     Basis {

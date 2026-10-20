@@ -90,7 +90,8 @@ pub fn compute(a: &Activity, st: &Stream, settings: &Settings, observed_max: Opt
     if total_z > 0.0 {
         m.hard_share = (m.zones_s[4] + m.zones_s[5]) / total_z;
     }
-    match hr::trimp(st, settings.effective_hr_rest(), zones.max) {
+    let female = settings.sex == Some(crate::settings::Sex::Female);
+    match hr::trimp(st, settings.effective_hr_rest(), zones.max, female) {
         Some(t) => {
             m.load = t;
             m.load_source = "hr".into();
