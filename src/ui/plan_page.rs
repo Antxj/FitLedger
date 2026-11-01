@@ -121,6 +121,8 @@ pub fn show(app: &mut App, ui: &mut Ui) {
     for t in &c.sessions {
         weeks.entry(week_start(t.session.date)).or_default().push(t);
     }
+    let sick = crate::coach::game::load_sick_weeks(&app.db);
+    let mut toggle_sick: Option<NaiveDate> = None;
     let this_week = week_start(today);
     let show_past = app.pages.plan.show_past;
     let mut open_run = None;
@@ -155,6 +157,9 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                         ),
                     ));
                     widgets::chip(ui, first.phase.label(), widgets::ACCENT);
+                    if sick.contains(ws) {
+                        widgets::chip(ui, tr!("doente/viagem", "sick/travel"), egui::Color32::GRAY);
+                    }
                     if *ws == this_week {
                         widgets::chip(ui, tr!("semana atual", "this week"), widgets::WARN);
                     }
@@ -166,6 +171,17 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                             format::km(km * 1000.0)
                         ),
                     ));
+                    if *ws <= this_week
+                        && ui
+                            .small_button(if sick.contains(ws) { tr!("desmarcar doente/viagem", "unmark sick/travel") } else { tr!("doente/viagem", "sick/travel") })
+                            .on_hover_text(tr!(
+                                "Semana em que você ficou doente ou viajou: os treinos perdidos não contam para o treinador nem quebram a sequência.",
+                                "A week when you were sick or travelling: missed sessions do not count for the coach and do not break the streak."
+                            ))
+                            .clicked()
+                    {
+                        toggle_sick = Some(*ws);
+                    }
                     if !past.is_empty() {
                         ui.label(weak(ui, trf!("· {done}/{} feitos", "· {done}/{} done", past.len())));
                     }
@@ -205,16 +221,29 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                                 open_run = Some(id);
                             }
                             widgets::chip(ui, t.status.label(), status_color(t.status));
+                            if let Some(sc) = app.game.as_ref().and_then(|g| g.scores.get(&t.id)) {
+                                ui.label(RichText::new(super::game_ui::stars_text(sc.stars())).color(super::game_ui::GOLD))
+                                    .on_hover_text(sc.reasons.join("\n"));
+                            }
                         });
                     });
                     if app.pages.plan.open == Some(t.id) {
-                        ui.indent(("d", t.id), |ui| session_details(ui, t));
+                        ui.indent(("d", t.id), |ui| {
+                            session_details(ui, t);
+                            if let Some(sc) = app.game.as_ref().and_then(|g| g.scores.get(&t.id)) {
+                                super::game_ui::score_details(ui, sc);
+                            }
+                        });
                     }
                 }
             });
             ui.add_space(4.0);
         }
     });
+    if let Some(w) = toggle_sick {
+        crate::coach::game::toggle_sick_week(&app.db, w);
+        app.refresh_coach(false);
+    }
     if let Some(id) = toggle {
         app.pages.plan.open = if app.pages.plan.open == Some(id) {
             None

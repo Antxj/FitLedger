@@ -287,13 +287,33 @@ fn data(app: &mut App, ui: &mut Ui) {
         {
             let _ = std::process::Command::new("explorer").arg(&app.paths.data).spawn();
         }
+        let mut game_on = app.settings.game;
+        if ui
+            .checkbox(
+                &mut game_on,
+                tr!("Pontos, níveis e conquistas", "Points, levels and achievements"),
+            )
+            .changed()
+        {
+            app.settings.game = game_on;
+            app.save_settings();
+            app.refresh_game();
+        }
+        let mut anim = app.settings.celebrations;
+        if ui
+            .checkbox(&mut anim, tr!("Animação de comemoração", "Celebration animation"))
+            .changed()
+        {
+            app.settings.celebrations = anim;
+            app.save_settings();
+        }
         let mut auto = app.settings.auto_import;
         if ui
             .checkbox(
                 &mut auto,
                 tr!(
-                    "Importar novos arquivos de /fits ao abrir",
-                    "Import new files from /fits on start"
+                    "Importar novos arquivos de /fits (ao abrir e com o app aberto)",
+                    "Import new files from /fits (on start and while open)"
                 ),
             )
             .changed()

@@ -103,6 +103,20 @@ pub fn show(app: &mut App, ui: &mut Ui, id: i64) {
 
     header(app, ui, &a);
     summary_cards(ui, &a, &m);
+    if let Some(sc) = app
+        .game
+        .as_ref()
+        .and_then(|g| g.scores.values().find(|s| s.activity_id == a.id))
+        .cloned()
+    {
+        egui::CollapsingHeader::new(RichText::new(format!(
+            "{} {}",
+            tr!("Resultado do treino do plano", "Plan session result"),
+            super::game_ui::stars_text(sc.stars())
+        )))
+        .default_open(false)
+        .show(ui, |ui| super::game_ui::score_details(ui, &sc));
+    }
     ui.add_space(6.0);
 
     let has_stream = app.pages.activity.stream.as_ref().is_some_and(|s| !s.is_empty());
@@ -691,14 +705,29 @@ pub fn zones_table(ui: &mut Ui, m: &Metrics) {
 }
 
 fn zones_tab(ui: &mut Ui, m: &Metrics) {
-    ui.label(weak(
-        ui,
-        trf!(
-            "Zonas calculadas com FC máxima de {} bpm. Ajuste em Configurações → Frequência cardíaca.",
-            "Zones computed with a max heart rate of {} bpm. Change it in Settings → Heart rate.",
-            m.zone_max.round()
-        ),
-    ));
+    ui.horizontal(|ui| {
+        ui.label(weak(
+            ui,
+            trf!(
+                "Zonas calculadas com FC máxima de {} bpm. Ajuste em Configurações → Frequência cardíaca.",
+                "Zones computed with a max heart rate of {} bpm. Change it in Settings → Heart rate.",
+                m.zone_max.round()
+            ),
+        ));
+        widgets::help(
+            ui,
+            tr!(
+                "Z1–Z2: leve, conversa fácil; é onde a base aeróbica cresce e onde fica a maior parte do plano.
+Z3: moderado.
+Z4: limiar, o ritmo forte sustentável.
+Z5: máximo, só em tiros curtos.",
+                "Z1–Z2: easy, you can talk; this builds the aerobic base and is most of the plan.
+Z3: moderate.
+Z4: threshold, the hard sustainable pace.
+Z5: maximum, only in short repeats."
+            ),
+        );
+    });
     ui.add_space(6.0);
     zones_table(ui, m);
 }
@@ -781,7 +810,16 @@ pub fn drift_table(ui: &mut Ui, d: &hr::Drift) {
             };
             ui.label(pace_diff);
             ui.end_row();
-            ui.label(RichText::new(tr!("Desacoplamento Pa:FC", "Pa:HR decoupling")).strong());
+            ui.horizontal(|ui| {
+                ui.label(RichText::new(tr!("Desacoplamento Pa:FC", "Pa:HR decoupling")).strong());
+                widgets::help(
+                    ui,
+                    tr!(
+                        "Quanto a relação ritmo/FC piorou da 1ª para a 2ª metade da corrida. Abaixo de 5% indica boa base aeróbica naquele ritmo; acima de 10%, o ritmo ou a duração ainda estão além dela (ou calor e desidratação pesaram).",
+                        "How much the pace/HR relation worsened from the 1st to the 2nd half of the run. Below 5% means a good aerobic base at that pace; above 10%, the pace or duration is still beyond it (or heat and dehydration weighed in)."
+                    ),
+                );
+            });
             ui.label("");
             ui.label("");
             let dec = d.decoupling_pct;

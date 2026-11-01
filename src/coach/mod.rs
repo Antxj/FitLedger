@@ -13,6 +13,7 @@
 
 pub mod adapt;
 pub mod fitness;
+pub mod game;
 pub mod plan;
 pub mod science;
 pub mod store;

@@ -38,6 +38,26 @@ schedule built for *you* — from the runs your watch already records.
 |---|---|---|
 | ![Plan](docs/en/plan.png) | ![Progress](docs/en/progress.png) | ![Run](docs/en/run-charts.png) |
 
+## Points for following the plan
+
+Motivation that rewards the right thing: **doing what the plan proposed**, not running more.
+
+- **A report card after every run.** Each plan session earns up to three stars — done at the
+  planned size, at the planned effort (heart rate under the cap on easy runs, pace in range on
+  harder ones) and on target — with the reason for each one.
+- **Levels and a weekly streak.** Points move you from *First Steps* to *Plan Master*. A week counts
+  when you do at least two thirds of its sessions; rest days never break the streak, one bad week in
+  eight is forgiven, and a week marked *sick/travel* does not count at all.
+- **Missions and achievements** taken from the plan itself: this week's sessions, easy runs at the
+  right effort, the progress check, your first 5 km, a lower heart rate at goal pace and more.
+- **A journey map** from where you started to the goal, with the milestones you have reached.
+- Calm by default: a short celebration on a new level (can be turned off), and the whole thing can
+  be switched off in *Settings*.
+
+| Achievements | After a run |
+|---|---|
+| ![Achievements](docs/en/achievements.png) | ![Report card](docs/en/report-card.png) |
+
 ## The science behind the plan
 
 FitLedger's coach is built on well-established exercise science, applied conservatively:
@@ -64,7 +84,7 @@ assumptions as you run. The full list, with complete references, is in the app u
 ## Everything your runs can tell you
 
 - **Automatic import** of `.fit` files: drop them in the `fits` folder next to the app and they are
-  imported every time it opens. Duplicates are detected, broken files never stop the others, and
+  imported when it opens and while it is open — or drag them onto the window. Duplicates are detected, broken files never stop the others, and
   your original files are never modified.
 - **Detailed runs:** linked charts of heart rate, pace, speed, cadence, altitude and power (hover
   to read any value), splits by 500 m / 1 km / mile / any distance, laps, heart-rate zones,

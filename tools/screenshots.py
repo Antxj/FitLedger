@@ -16,7 +16,7 @@ from pathlib import Path
 from PIL import Image
 
 ROOT = Path(__file__).resolve().parent.parent
-SHOTS = ["today", "plan", "goal", "progress", "run-charts", "runs", "reports"]
+SHOTS = ["today", "plan", "achievements", "report-card", "goal", "progress", "run-charts", "runs", "reports"]
 
 
 def main():

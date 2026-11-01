@@ -37,6 +37,13 @@ pub fn session_details(ui: &mut Ui, t: &Tracked) {
         ui.label(RichText::new(format!("≈ {}", format::km(s.distance_m))).size(16.0));
         if let Some(h) = s.hr_max {
             widgets::chip(ui, &trf!("FC ≤ {} bpm", "HR ≤ {} bpm", h.round()), widgets::HR);
+            widgets::help(
+                ui,
+                tr!(
+                    "Limite de FC desta sessão. Nas corridas leves é o topo da zona 2 (calculada pela sua FC de reserva): ficar abaixo dele é o que melhora a base aeróbica e baixa a FC no mesmo ritmo.",
+                    "This session's HR limit. On easy runs it is the top of zone 2 (from your heart-rate reserve): staying under it is what builds the aerobic base and lowers HR at the same pace."
+                ),
+            );
         }
         widgets::chip(
             ui,
@@ -236,6 +243,15 @@ fn content(app: &mut App, ui: &mut Ui) {
     });
 
     ui.add_space(8.0);
+    if let Some(g) = app.game.clone() {
+        ui.columns(2, |cols| {
+            super::game_ui::level_card(&mut cols[0], &g);
+            super::game_ui::missions_card(&mut cols[1], &g);
+        });
+        ui.add_space(8.0);
+    }
+    super::game_ui::journey(ui, &c, &app.data.activities);
+    ui.add_space(8.0);
     week_strip(app, ui, &c, today);
     ui.add_space(8.0);
     // coach notes
@@ -390,13 +406,20 @@ fn fitness_card(ui: &mut Ui, c: &crate::coach::store::CoachState) {
     let f = &c.fitness;
     widgets::card_frame(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
-        ui.label(
-            weak(
+        ui.horizontal(|ui| {
+            ui.label(weak(ui, tr!("Seu momento (últimas 6 semanas)", "Where you are (last 6 weeks)")).small());
+            widgets::help(
                 ui,
-                tr!("Seu momento (últimas 6 semanas)", "Where you are (last 6 weeks)"),
-            )
-            .small(),
-        );
+                tr!(
+                    "Ritmo leve: o pace em que sua FC fica no topo da zona 2, tirado da relação FC × velocidade das suas corridas.
+Tempo previsto: fórmula de Riegel a partir das suas melhores corridas recentes.
+FC estimada: a FC que você teria hoje no pace da meta; a tendência mostra quanto ela cai por semana.",
+                    "Easy pace: the pace at which your HR sits at the top of zone 2, from the HR × speed relation of your runs.
+Predicted time: Riegel's formula from your best recent runs.
+Estimated HR: the HR you would have today at goal pace; the trend shows how much it drops per week."
+                ),
+            );
+        });
         egui::Grid::new("fitness")
             .num_columns(2)
             .spacing([16.0, 3.0])

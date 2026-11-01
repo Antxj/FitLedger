@@ -5,6 +5,7 @@ mod activities;
 mod activity;
 pub mod charts;
 mod compare;
+mod game_ui;
 mod goal_page;
 mod onboarding;
 mod plan_page;
@@ -38,6 +39,7 @@ pub enum Page {
     Activity(i64),
     Compare,
     Progress,
+    Achievements,
     Reports,
     Settings,
 }
@@ -111,6 +113,14 @@ pub struct App {
     shots: Vec<(String, Page, Option<activity::Tab>)>,
     /// Goal, fitness, projection and sessions; None until a goal exists.
     pub coach: Option<CoachState>,
+    /// Points, levels, streak, missions and achievements (None when turned off).
+    pub game: Option<crate::coach::game::State>,
+    /// Shown after an import.
+    pub report_card: Option<game_ui::ReportCard>,
+    celebration: Option<game_ui::Celebration>,
+    /// Files seen in /fits (path → size, modified) to notice new ones while open.
+    fits_seen: HashMap<std::path::PathBuf, (u64, Option<std::time::SystemTime>)>,
+    last_fits_check: Instant,
 }
 
 /// Per-page UI state that must survive between frames.
@@ -152,6 +162,11 @@ impl App {
             shooter: crate::screenshots::Shooter::from_env(),
             shots: Vec::new(),
             coach: None,
+            game: None,
+            report_card: None,
+            celebration: None,
+            fits_seen: HashMap::new(),
+            last_fits_check: Instant::now(),
         };
         app.reload();
         if app.shooter.is_some() {
@@ -206,6 +221,172 @@ impl App {
             Ok(c) => self.coach = c,
             Err(e) => self.toast_error(trf!("Erro no plano: {e}", "Plan error: {e}")),
         }
+        self.refresh_game();
+    }
+
+    /// Recomputes points, streak, missions and achievements from the data.
+    pub fn refresh_game(&mut self) {
+        use crate::coach::game;
+        if !self.settings.game {
+            self.game = None;
+            return;
+        }
+        let today = chrono::Local::now().date_naive();
+        let sessions = self.db.all_tracked_sessions().unwrap_or_default();
+        let sick = game::load_sick_weeks(&self.db);
+        let empty = Vec::new();
+        let g = game::compute(&game::Inputs {
+            sessions: &sessions,
+            runs: &self.data.activities,
+            metrics: &self.data.metrics,
+            hr_history: self.coach.as_ref().map(|c| &c.fitness.hr_history).unwrap_or(&empty),
+            goal_reached: self.coach.as_ref().and_then(|c| c.reached.map(|r| r.0)),
+            has_goal: self.coach.is_some(),
+            sick_weeks: &sick,
+            today,
+        });
+        // first time: what was already unlocked is not celebrated again
+        if self.db.get_kv("game_initialized").is_none() {
+            let seen = g
+                .achievements
+                .iter()
+                .filter(|a| a.unlocked.is_some())
+                .map(|a| a.id.to_string())
+                .collect();
+            game::save_seen(&self.db, &seen);
+            let _ = self.db.set_kv("game_initialized", "1");
+        }
+        self.game = Some(g);
+    }
+
+    /// After an import: the report card of the latest run, new achievements
+    /// and a celebration for a level-up or a big achievement.
+    fn after_import(&mut self, imported: &[(String, i64)], level_before: Option<usize>) {
+        use crate::coach::game;
+        let Some(g) = self.game.clone() else { return };
+        let mut seen = game::load_seen(&self.db);
+        let new: Vec<game::Achievement> = g
+            .achievements
+            .iter()
+            .filter(|a| a.unlocked.is_some() && !seen.contains(a.id))
+            .cloned()
+            .collect();
+        for a in &new {
+            seen.insert(a.id.to_string());
+        }
+        game::save_seen(&self.db, &seen);
+        let level_up = level_before.filter(|b| g.level.index > *b).map(|_| g.level.clone());
+        if (level_up.is_some() || new.iter().any(|a| a.major)) && self.settings.celebrations {
+            self.celebration = Some(game_ui::Celebration::new(crate::db::now() as u64));
+        }
+        // the latest imported run gets the report card
+        let latest = imported
+            .iter()
+            .filter_map(|(_, id)| self.data.get(*id))
+            .max_by_key(|a| a.start_time)
+            .map(|a| a.id);
+        let Some(id) = latest else { return };
+        let score = g.scores.values().find(|s| s.activity_id == id).cloned();
+        let mut highlights = Vec::new();
+        if let Some(c) = &self.coach
+            && let Some(a) = self.data.get(id)
+        {
+            let h = &c.fitness.hr_history;
+            let d = crate::coach::fitness::day(a);
+            if let Some(pos) = h.iter().position(|x| x.0 == d)
+                && pos > 0
+            {
+                let diff = h[pos].1 - h[pos - 1].1;
+                if diff <= -1.0 {
+                    highlights.push(trf!(
+                        "FC estimada no pace da meta {} bpm menor que na corrida anterior",
+                        "Estimated HR at goal pace {} bpm lower than on the previous run",
+                        (-diff).round()
+                    ));
+                }
+            }
+        }
+        if let Some(a) = self.data.get(id) {
+            let longest_before = self
+                .data
+                .activities
+                .iter()
+                .filter(|x| x.start_time < a.start_time)
+                .filter_map(|x| x.distance())
+                .fold(0.0, f64::max);
+            if a.distance().unwrap_or(0.0) > longest_before && longest_before > 0.0 {
+                highlights.push(trf!(
+                    "Sua maior corrida até agora: {}",
+                    "Your longest run so far: {}",
+                    crate::format::opt_km(a.distance())
+                ));
+            }
+        }
+        self.report_card = Some(game_ui::ReportCard {
+            activity_id: id,
+            score,
+            level_up,
+            new_achievements: new,
+            highlights,
+        });
+    }
+
+    /// Imports files dropped on the window and notices new files in /fits.
+    fn watch_inputs(&mut self, ctx: &egui::Context) {
+        let dropped: Vec<std::path::PathBuf> = ctx.input(|i| {
+            i.raw
+                .dropped_files
+                .iter()
+                .map(|f| f.path().to_path_buf())
+                .filter(|p| p.extension().is_some_and(|e| e.eq_ignore_ascii_case("fit")))
+                .collect()
+        });
+        if !dropped.is_empty() {
+            self.start_job(JobKind::Import {
+                files: dropped,
+                remember_errors: false,
+            });
+        }
+        // while the app is open, look at /fits every 20 s (cheap: only names, sizes and dates)
+        if self.settings.auto_import && self.last_fits_check.elapsed() > Duration::from_secs(20) && !self.job_running()
+        {
+            self.last_fits_check = Instant::now();
+            let files = import::scan(&self.paths.fits);
+            let mut changed = false;
+            for f in &files {
+                let meta = std::fs::metadata(f).ok();
+                let key = (
+                    meta.as_ref().map(|m| m.len()).unwrap_or(0),
+                    meta.and_then(|m| m.modified().ok()),
+                );
+                if self.fits_seen.insert(f.clone(), key) != Some(key) {
+                    changed = true;
+                }
+            }
+            if changed && self.page != Page::Onboarding {
+                self.import_from_folder(true);
+            }
+        }
+        if !self.job_running() {
+            ctx.request_repaint_after(Duration::from_secs(20));
+        }
+    }
+
+    fn drop_overlay(&self, ctx: &egui::Context) {
+        let hovering = ctx.input(|i| !i.raw.hovered_files.is_empty());
+        if !hovering {
+            return;
+        }
+        let rect = ctx.content_rect();
+        let painter = ctx.layer_painter(egui::LayerId::new(egui::Order::Foreground, egui::Id::new("drop")));
+        painter.rect_filled(rect, 0.0, Color32::from_black_alpha(170));
+        painter.text(
+            rect.center(),
+            egui::Align2::CENTER_CENTER,
+            tr!("Solte os arquivos .fit para importar", "Drop the .fit files to import"),
+            egui::FontId::proportional(26.0),
+            Color32::WHITE,
+        );
     }
 
     pub fn save_settings(&mut self) {
@@ -351,9 +532,13 @@ impl App {
             j.finished.take()
         };
         let Some(result) = finished else { return };
+        let level_before = self.game.as_ref().map(|g| g.level.index);
         self.reload();
         match result {
             JobResult::Import(r) => {
+                if !r.imported.is_empty() && self.page != Page::Onboarding {
+                    self.after_import(&r.imported, level_before);
+                }
                 let text = trf!("Importação: {}", "Import: {}", r.summary());
                 if r.errors.is_empty() {
                     self.toast(text);
@@ -427,8 +612,9 @@ impl App {
                 });
             }
         }
-        let items: [(&str, &str, Page); 3] = [
+        let items: [(&str, &str, Page); 4] = [
             ("📈", tr!("Análises", "Analysis"), Page::Progress),
+            ("🏆", tr!("Conquistas", "Achievements"), Page::Achievements),
             ("📄", tr!("Relatórios", "Reports"), Page::Reports),
             ("⚙", tr!("Configurações", "Settings"), Page::Settings),
         ];
@@ -624,6 +810,8 @@ impl App {
         }
         v.extend([
             ("progress".into(), Page::Progress, None),
+            ("achievements".into(), Page::Achievements, None),
+            ("report-card".into(), Page::Today, None),
             ("reports".into(), Page::Reports, None),
             ("settings".into(), Page::Settings, None),
             ("onboarding".into(), Page::Onboarding, None),
@@ -661,7 +849,13 @@ impl App {
             return;
         };
         if sh.frames == 0 {
+            let name = self.shots.get(sh.index).map(|s| s.0.clone()).unwrap_or_default();
             self.page = page;
+            if name == "report-card"
+                && let Some(id) = self.data.activities.first().map(|a| a.id)
+            {
+                self.after_import(&[(String::new(), id)], None);
+            }
             if let Some(t) = tab {
                 self.pages.activity.tab = t;
             }
@@ -690,6 +884,9 @@ impl eframe::App for App {
         let ctx = ui.ctx().clone();
         self.apply_theme(&ctx);
         self.poll_job(&ctx);
+        if self.shooter.is_none() {
+            self.watch_inputs(&ctx);
+        }
         self.screenshot_step(&ctx);
 
         if self.page != Page::Onboarding {
@@ -710,10 +907,18 @@ impl eframe::App for App {
                 Page::Activity(id) => activity::show(self, ui, id),
                 Page::Compare => compare::show(self, ui),
                 Page::Progress => progress::show(self, ui),
+                Page::Achievements => game_ui::show_page(self, ui),
                 Page::Reports => reports_page::show(self, ui),
                 Page::Settings => settings_page::show(self, ui),
             });
         self.report_window(&ctx);
+        game_ui::report_card_window(self, &ctx);
+        if let Some(c) = &self.celebration
+            && !c.draw(&ctx)
+        {
+            self.celebration = None;
+        }
+        self.drop_overlay(&ctx);
         self.toasts_ui(&ctx);
     }
 }

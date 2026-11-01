@@ -54,6 +54,10 @@ pub struct Settings {
     pub auto_update: bool,
     /// Import new files from /fits when the app opens.
     pub auto_import: bool,
+    /// Points, levels, streaks and achievements.
+    pub game: bool,
+    /// Short celebration animation on level-ups and big achievements.
+    pub celebrations: bool,
 }
 
 impl Default for Settings {
@@ -72,6 +76,8 @@ impl Default for Settings {
             onboarded: false,
             auto_update: true,
             auto_import: true,
+            game: true,
+            celebrations: true,
         }
     }
 }

@@ -209,6 +209,12 @@ pub fn date_picker(ui: &mut Ui, date: &mut chrono::NaiveDate, id: &str) -> egui:
     r
 }
 
+/// Small "?" that explains a term on hover.
+pub fn help(ui: &mut Ui, text: &str) {
+    ui.label(RichText::new("?").small().strong().color(ACCENT))
+        .on_hover_text(text);
+}
+
 /// Confirmation popup state helper: returns true when "Yes" was clicked.
 pub fn confirm_window(ctx: &egui::Context, open: &mut bool, title: &str, text: &str) -> bool {
     let mut yes = false;

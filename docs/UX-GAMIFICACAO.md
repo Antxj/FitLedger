@@ -136,3 +136,13 @@ Cada fase sai como uma versão (0.3, 0.4…), com testes e capturas atualizadas.
   doente/viagem).
 - **Animações:** curtas (≈1,5 s), só em marcos importantes, e desligáveis.
 - **Lembretes do Windows:** ficam para depois.
+- **Pontuação:** premia seguir o que o plano propôs (tamanho, esforço e objetivo de cada sessão),
+  não correr mais.
+
+## 7. Situação
+
+- **v0.3.0:** fases 1, 2 e 3 implementadas (22 conquistas, 10 níveis, sequência com coringa a cada
+  8 semanas, missões tiradas do plano, mapa da jornada, boletim com comemoração desligável,
+  arrastar e soltar, pasta `fits` vigiada a cada 20 s, ajuda "?" nos termos técnicos, semana
+  doente/viagem que não conta para o treinador nem para a sequência).
+- **Pendente (fase 4):** lembretes do Windows, calendário mensal, retrospectivas, tour e acessibilidade.

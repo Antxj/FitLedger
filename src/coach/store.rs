@@ -136,6 +136,32 @@ impl Db {
             .collect())
     }
 
+    /// Sessions of every goal version (history for streaks and achievements).
+    pub fn all_tracked_sessions(&self) -> Result<Vec<Tracked>> {
+        let mut st = self
+            .conn
+            .prepare("SELECT id, json, status, activity_id FROM coach_session ORDER BY date, id")?;
+        let rows = st.query_map([], |r| {
+            Ok((
+                r.get::<_, i64>(0)?,
+                r.get::<_, String>(1)?,
+                r.get::<_, String>(2)?,
+                r.get::<_, Option<i64>>(3)?,
+            ))
+        })?;
+        Ok(rows
+            .flatten()
+            .filter_map(|(id, j, st, a)| {
+                Some(Tracked {
+                    id,
+                    session: serde_json::from_str(&j).ok()?,
+                    status: Status::from_code(&st),
+                    activity_id: a,
+                })
+            })
+            .collect())
+    }
+
     fn update_tracked(&self, t: &Tracked) -> Result<()> {
         self.conn.execute(
             "UPDATE coach_session SET status = ?2, activity_id = ?3 WHERE id = ?1",
@@ -255,7 +281,14 @@ pub fn refresh(db: &mut Db, today: NaiveDate, goal_changed: bool) -> Result<Opti
         &goal,
     );
     let reached = plan::goal_reached(&goal, &runs, &best);
-    let mut adjust = adapt::review(&tracked, &runs, &metrics, today);
+    // weeks marked as sick/travel do not count as missed sessions
+    let sick = super::game::load_sick_weeks(db);
+    let counted: Vec<Tracked> = tracked
+        .iter()
+        .filter(|t| !sick.contains(&super::week_start(t.session.date)))
+        .cloned()
+        .collect();
+    let mut adjust = adapt::review(&counted, &runs, &metrics, today);
     if let Some((on, by)) = reached {
         db.mark_reached(goal.id, on, by)?;
         adjust.notes.insert(0, Note::GoalReached { date: on });
