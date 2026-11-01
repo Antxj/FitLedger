@@ -9,7 +9,7 @@ repository = "https://github.com/Antxj/FitLedger"
 
 [dependencies]
 eframe = { version = "0.36", default-features = false, features = ["glow", "default_fonts", "accesskit"] }
-egui_plot = "0.37"
+egui_plot = "0.38"
 egui_extras = { version = "0.36", default-features = false, features = ["datepicker"] }
 # date type of the egui_extras date picker (already a dependency of it)
 jiff = { version = "0.2.35", default-features = false, features = ["std"] }
