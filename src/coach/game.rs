@@ -1,6 +1,7 @@
-//! Gamification that rewards **following the plan**: doing the planned
-//! session, at the planned effort, for about the planned time. Running more
-//! or harder than planned earns nothing extra (and can cost a star).
+//! Feedback that rewards **following the plan**: each session gets up to
+//! three stars (done at the planned size, at the planned effort, on target),
+//! plus a weekly streak and achievements. Running more or harder than
+//! planned earns nothing extra (and can cost a star).
 //!
 //! Everything is derived from the runs and the plan, so it can always be
 //! recalculated and never drifts from the data.
@@ -14,15 +15,6 @@ use crate::model::{Activity, Modality};
 use chrono::{Duration, NaiveDate, Timelike};
 use std::collections::{BTreeMap, HashMap, HashSet};
 
-pub const XP_DONE: u32 = 10;
-pub const XP_PARTIAL: u32 = 4;
-pub const XP_STAR: u32 = 5;
-pub const XP_CHECK_BONUS: u32 = 10;
-pub const XP_GOAL_BONUS: u32 = 40;
-/// Runs outside the plan are welcome, but they are not what the game rewards.
-pub const XP_UNPLANNED: u32 = 2;
-pub const XP_MISSION: u32 = 15;
-
 /// Result of one planned session that has a run.
 #[derive(Debug, Clone, PartialEq)]
 pub struct Score {
@@ -34,7 +26,6 @@ pub struct Score {
     pub star_effort: bool,
     /// Hit the session's own target (check distance, intervals, goal...).
     pub star_target: bool,
-    pub xp: u32,
     /// Why each star was or was not given.
     pub reasons: Vec<String>,
 }
@@ -183,71 +174,13 @@ pub fn score(t: &Tracked, a: &Activity, m: Option<&Metrics>, goal_reached: bool)
         }
     };
 
-    let mut xp = match t.status {
-        Status::Done => XP_DONE,
-        Status::Partial => XP_PARTIAL,
-        _ => 0,
-    };
-    xp += XP_STAR * (star_effort as u32 + star_target as u32);
-    if s.kind == SessionKind::Check && star_target {
-        xp += XP_CHECK_BONUS;
-    }
-    if s.kind == SessionKind::GoalAttempt && goal_reached {
-        xp += XP_GOAL_BONUS;
-    }
     Score {
         session_id: t.id,
         activity_id: a.id,
         star_done,
         star_effort,
         star_target,
-        xp,
         reasons,
-    }
-}
-
-/// Levels: (minimum XP, name pt, name en).
-pub const LEVELS: [(u32, &str, &str); 10] = [
-    (0, "Primeiros Passos", "First Steps"),
-    (60, "Trotador", "Jogger"),
-    (160, "Corredor 3K", "3K Runner"),
-    (320, "Corredor 5K", "5K Runner"),
-    (540, "Corredor Constante", "Steady Runner"),
-    (820, "Corredor 8K", "8K Runner"),
-    (1160, "Corredor 10K", "10K Runner"),
-    (1560, "Coração Eficiente", "Efficient Heart"),
-    (2020, "Fundista", "Distance Runner"),
-    (2540, "Mestre do Plano", "Plan Master"),
-];
-
-#[derive(Debug, Clone, PartialEq)]
-pub struct Level {
-    pub index: usize,
-    pub name: &'static str,
-    pub xp: u32,
-    /// XP of this level's floor and of the next one (None at the top).
-    pub floor: u32,
-    pub next: Option<u32>,
-}
-
-impl Level {
-    pub fn of(xp: u32) -> Level {
-        let index = LEVELS.iter().rposition(|l| xp >= l.0).unwrap_or(0);
-        let (floor, pt, en) = LEVELS[index];
-        Level {
-            index,
-            name: if crate::i18n::pt() { pt } else { en },
-            xp,
-            floor,
-            next: LEVELS.get(index + 1).map(|l| l.0),
-        }
-    }
-
-    pub fn fraction(&self) -> f32 {
-        match self.next {
-            Some(n) => (self.xp - self.floor) as f32 / (n - self.floor) as f32,
-            None => 1.0,
-        }
     }
 }
 
@@ -325,85 +258,6 @@ pub fn streak(weeks: &mut [WeekResult]) -> (u32, u32) {
 }
 
 #[derive(Debug, Clone, PartialEq)]
-pub struct Mission {
-    pub text: String,
-    pub done: u32,
-    pub target: u32,
-}
-
-impl Mission {
-    pub fn complete(&self) -> bool {
-        self.done >= self.target
-    }
-}
-
-/// 2–3 missions for the current week, taken from the plan itself (the
-/// queue and what was done this week).
-pub fn missions(sessions: &[Tracked], scores: &HashMap<i64, Score>, today: NaiveDate) -> Vec<Mission> {
-    let ws = week_start(today);
-    let week: Vec<&Tracked> = sessions
-        .iter()
-        .filter(|t| t.activity_id.is_some() && week_start(t.session.date) == ws)
-        .collect();
-    let queue: Vec<&Tracked> = sessions
-        .iter()
-        .filter(|t| t.activity_id.is_none() && t.status == Status::Planned)
-        .collect();
-    if week.is_empty() && queue.is_empty() {
-        return Vec::new();
-    }
-    let easy = |t: &&&Tracked| matches!(t.session.kind, SessionKind::Easy | SessionKind::Long);
-    let mut out = vec![Mission {
-        text: tr!(
-            "Faça 2 treinos do plano esta semana (1 já mantém a sequência)",
-            "Do 2 plan sessions this week (1 keeps the streak)"
-        )
-        .into(),
-        done: week.len().min(2) as u32,
-        target: 2,
-    }];
-    if let Some(cap) = queue
-        .iter()
-        .chain(week.iter())
-        .filter(easy)
-        .find_map(|t| t.session.hr_max)
-    {
-        out.push(Mission {
-            text: trf!(
-                "Faça uma corrida leve no esforço certo (FC ≤ {} bpm)",
-                "Do an easy run at the right effort (HR ≤ {} bpm)",
-                cap.round()
-            ),
-            done: week
-                .iter()
-                .filter(easy)
-                .any(|t| scores.get(&t.id).is_some_and(|s| s.star_effort)) as u32,
-            target: 1,
-        });
-    }
-    let has = |k: SessionKind| queue.iter().chain(week.iter()).any(|t| t.session.kind == k);
-    let hit = |k: SessionKind| {
-        week.iter()
-            .filter(|t| t.session.kind == k)
-            .any(|t| scores.get(&t.id).is_some_and(|s| s.star_target)) as u32
-    };
-    if has(SessionKind::Check) {
-        out.push(Mission {
-            text: tr!("Complete o teste de evolução", "Complete the progress check").into(),
-            done: hit(SessionKind::Check),
-            target: 1,
-        });
-    } else if has(SessionKind::Long) {
-        out.push(Mission {
-            text: tr!("Faça o longão sem exagerar", "Do the long run without overdoing it").into(),
-            done: hit(SessionKind::Long),
-            target: 1,
-        });
-    }
-    out
-}
-
-#[derive(Debug, Clone, PartialEq)]
 pub struct Achievement {
     pub id: &'static str,
     pub icon: &'static str,
@@ -432,12 +286,9 @@ pub struct Inputs<'a> {
 #[derive(Debug, Clone, PartialEq)]
 pub struct State {
     pub scores: HashMap<i64, Score>,
-    pub xp: u32,
-    pub level: Level,
     pub weeks: Vec<WeekResult>,
     pub streak: u32,
     pub best_streak: u32,
-    pub missions: Vec<Mission>,
     pub achievements: Vec<Achievement>,
 }
 
@@ -482,15 +333,8 @@ pub fn compute(inp: &Inputs) -> State {
             scores.insert(t.id, score(t, a, inp.metrics.get(&a.id), reached));
         }
     }
-    let planned_runs: HashSet<i64> = inp.sessions.iter().filter_map(|t| t.activity_id).collect();
-    let unplanned = inp.runs.iter().filter(|a| !planned_runs.contains(&a.id)).count() as u32;
     let mut weeks = weeks(inp.sessions, &scores, inp.sick_weeks, inp.today);
     let (streak, best_streak) = streak(&mut weeks);
-    let missions = missions(inp.sessions, &scores, inp.today);
-    // missions of past weeks are not stored: the bonus counts for complete weeks
-    let mission_xp: u32 = weeks.iter().filter(|w| w.consistent == Some(true)).count() as u32 * XP_MISSION
-        + missions.iter().filter(|m| m.complete()).count() as u32 * XP_MISSION;
-    let xp = scores.values().map(|s| s.xp).sum::<u32>() + unplanned * XP_UNPLANNED + mission_xp;
 
     // ---- achievements
     let mut runs: Vec<&Activity> = inp.runs.iter().collect();
@@ -839,13 +683,10 @@ pub fn compute(inp: &Inputs) -> State {
         ),
     ];
     State {
-        level: Level::of(xp),
         scores,
-        xp,
         weeks,
         streak,
         best_streak,
-        missions,
         achievements,
     }
 }
@@ -940,17 +781,7 @@ mod tests {
         // twice as long and too hard: no extra reward for doing more
         let over = score(&t, &run(10, "2026-10-20", 60.0), Some(&easy_metrics(0.40)), false);
         assert!(over.stars() < good.stars());
-        assert!(over.xp < good.xp, "{} < {}", over.xp, good.xp);
         assert!(over.reasons.iter().any(|r| r.contains("plano") || r.contains("plan")));
-    }
-
-    #[test]
-    fn levels() {
-        assert_eq!(Level::of(0).index, 0);
-        assert_eq!(Level::of(59).index, 0);
-        assert_eq!(Level::of(60).index, 1);
-        assert!((Level::of(110).fraction() - 0.5).abs() < 1e-6);
-        assert_eq!(Level::of(99_999).next, None);
     }
 
     #[test]
@@ -1039,10 +870,6 @@ mod tests {
         assert_eq!(st.streak, 2);
         assert_eq!(st.weeks.len(), 2);
         assert!(st.weeks[0].perfect && st.weeks[0].two && !st.weeks[1].two);
-        assert_eq!(st.missions.len(), 3);
-        assert_eq!((st.missions[0].done, st.missions[0].target), (1, 2));
-        assert_eq!((st.missions[1].done, st.missions[1].target), (1, 1));
-        assert!(st.missions[2].text.contains("teste") || st.missions[2].text.contains("check"));
         let unlocked: Vec<&str> = st
             .achievements
             .iter()
@@ -1053,8 +880,5 @@ mod tests {
             assert!(unlocked.contains(&id), "{id}: {unlocked:?}");
         }
         assert!(!unlocked.contains(&"streak_4"));
-        // unplanned run adds only a little
-        let base: u32 = st.scores.values().map(|s| s.xp).sum();
-        assert!(st.xp >= base + XP_UNPLANNED);
     }
 }

@@ -28,7 +28,8 @@ a plan built for *you* — from the runs your watch already records.
   cardiac drift? It waits before getting longer. A big week or high fatigue? The next session is
   lighter. Every change comes with the data that triggered it.
 - **Run + walk when it makes sense.** If keeping your heart rate in the easy zone means a very slow
-  pace, easy runs become jog/walk blocks — the walks shrink as your heart gets more efficient.
+  pace, easy runs become jog/walk blocks, each with its treadmill speed and road pace — the walks
+  shrink as your heart gets more efficient.
 - **Heart-rate first.** Easy runs have a clear heart-rate cap from *your* zones, and every session
   shows the pace range **and the matching treadmill speed** — road or treadmill, you know exactly
   what to do.
@@ -42,22 +43,21 @@ a plan built for *you* — from the runs your watch already records.
 |---|---|---|
 | ![Plan](docs/en/plan.png) | ![Progress](docs/en/progress.png) | ![Run](docs/en/run-charts.png) |
 
-## Points for following the plan
+## Feedback for following the plan
 
-Motivation that rewards the right thing: **doing what the plan proposed**, not running more.
+Calm, adult feedback that rewards the right thing: **doing what the plan proposed**, not running more.
 
-- **A report card after every run.** Each plan session earns up to three stars — done at the
+- **A report card after every run.** Each plan session gets up to three stars — done at the
   planned size, at the planned effort (heart rate under the cap on easy runs, pace in range on
   harder ones) and on target — with the reason for each one.
-- **Levels and a weekly streak.** Points move you from *First Steps* to *Plan Master*. A week counts
-  when you do at least one plan session (two or more earn a gold medal); one empty week in eight is
-  forgiven, and a week marked *sick/travel* does not count at all.
-- **Missions and achievements** taken from the plan itself: two sessions this week, an easy run at
-  the right effort, the progress check, your first 5 km, a lower heart rate at goal pace and more.
+- **A weekly streak.** A week counts when you do at least one plan session (two or more mark it
+  gold); one empty week in eight is forgiven, and a week marked *sick/travel* does not count at all.
+- **Achievements** for real milestones: your first 5 km, a progress check, a lower heart rate at
+  goal pace, easy runs at the right effort and more.
 - **A journey map** from where you started to the goal: distance milestones, or heart-rate
   milestones once the distance is there.
-- Calm by default: a short celebration on a new level (can be turned off), and the whole thing can
-  be switched off in *Settings*.
+- A short celebration on a big achievement (can be turned off), and the whole thing can be
+  switched off in *Settings*.
 
 | Achievements | After a run |
 |---|---|

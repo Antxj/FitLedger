@@ -54,17 +54,43 @@ pub fn session_details(ui: &mut Ui, t: &Tracked) {
             Color32::GRAY,
         );
     });
-    if let Some(p) = s.pace_text() {
-        let text = if s.run_walk() {
-            trf!(
-                "Pace médio, com as caminhadas: {}",
-                "Average pace, walks included: {}",
-                p
+    if let (true, Some(jog), Some(walk)) = (
+        s.run_walk(),
+        s.steps.first().and_then(|x| x.pace),
+        s.steps.get(1).and_then(|x| x.pace),
+    ) {
+        let kmh = |p: (f64, f64)| {
+            format!(
+                "{}–{} km/h",
+                format::num(format::pace_to_kmh(p.1), 1),
+                format::num(format::pace_to_kmh(p.0), 1)
             )
-        } else {
-            trf!("Pace: {}", "Pace: {}", p)
         };
-        ui.label(RichText::new(text).color(widgets::SPEED));
+        ui.label(
+            RichText::new(trf!(
+                "Velocidade: trote {} · caminhada {}",
+                "Speed: jog {} · walk {}",
+                kmh(jog),
+                kmh(walk)
+            ))
+            .color(widgets::SPEED)
+            .strong(),
+        );
+        ui.label(
+            weak(
+                ui,
+                trf!(
+                    "Na rua: trote a {}–{}/km. Comece no meio da faixa; se a FC passar de {} bpm no trote, baixe 0,3 km/h ou caminhe antes.",
+                    "On the road: jog at {}–{}/km. Start mid-range; if HR goes over {} bpm while jogging, lower 0.3 km/h or walk earlier.",
+                    format::pace(jog.0),
+                    format::pace(jog.1),
+                    s.hr_max.unwrap_or(0.0).round()
+                ),
+            )
+            .small(),
+        );
+    } else if let Some(p) = s.pace_text() {
+        ui.label(RichText::new(trf!("Pace: {}", "Pace: {}", p)).color(widgets::SPEED));
     }
     // one wrapped line per block (a grid would not wrap and widens the column)
     for st in &s.steps {
@@ -94,8 +120,8 @@ pub fn session_details(ui: &mut Ui, t: &Tracked) {
     }
     let run_walk_tip = s.run_walk().then(|| {
         trf!(
-            "Corrida + caminhada: trote leve com FC até {} bpm e caminhe 1 minuto entre os blocos (se a FC passar antes, caminhe antes). É o que deixa o coração trabalhar na zona certa enquanto ele fica mais eficiente; as caminhadas diminuem conforme a FC no mesmo ritmo cai.",
-            "Run + walk: easy jog with HR up to {} bpm and a 1-minute walk between blocks (walk earlier if HR goes over). It keeps the heart in the right zone while it gets more efficient; walks shrink as HR at the same pace drops.",
+            "Por que corrida + caminhada: para ficar com a FC até {} bpm você precisaria correr muito devagar. Os blocos de trote com caminhada mantêm o coração na zona certa enquanto ele fica mais eficiente; conforme a FC no mesmo ritmo cair, as caminhadas diminuem e a velocidade sobe.",
+            "Why run + walk: to stay at or under {} bpm you would have to run very slowly. Jog blocks with walks keep the heart in the right zone while it gets more efficient; as HR at the same pace drops, walks shrink and the speed goes up.",
             s.hr_max.unwrap_or(0.0).round()
         )
     });
@@ -280,10 +306,7 @@ fn content(app: &mut App, ui: &mut Ui) {
 
     ui.add_space(8.0);
     if let Some(g) = app.game.clone() {
-        ui.columns(2, |cols| {
-            super::game_ui::level_card(&mut cols[0], &g);
-            super::game_ui::missions_card(&mut cols[1], &g);
-        });
+        super::game_ui::streak_card(ui, &g);
         ui.add_space(8.0);
     }
     super::game_ui::journey(ui, &c, &app.data.activities);

@@ -291,7 +291,10 @@ fn data(app: &mut App, ui: &mut Ui) {
         if ui
             .checkbox(
                 &mut game_on,
-                tr!("Pontos, níveis e conquistas", "Points, levels and achievements"),
+                tr!(
+                    "Avaliação dos treinos (estrelas), sequência e conquistas",
+                    "Session ratings (stars), streak and achievements"
+                ),
             )
             .changed()
         {

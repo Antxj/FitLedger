@@ -154,8 +154,13 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 toggle = Some(t.id);
             }
             let mut txt = format!("{} · ≈ {}", format::duration(s.duration_s), format::km(s.distance_m));
-            if s.run_walk() {
-                txt.push_str(tr!(" · corrida + caminhada", " · run + walk"));
+            if let (true, Some(j)) = (s.run_walk(), s.steps.first().and_then(|x| x.pace)) {
+                txt.push_str(&trf!(
+                    " · corrida + caminhada, trote a {}–{} km/h",
+                    " · run + walk, jog at {}–{} km/h",
+                    format::num(format::pace_to_kmh(j.1), 1),
+                    format::num(format::pace_to_kmh(j.0), 1)
+                ));
             } else if let Some(p) = s.pace {
                 txt.push_str(&format!(" · {}–{}/km", format::pace(p.0), format::pace(p.1)));
             }

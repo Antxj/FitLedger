@@ -367,9 +367,14 @@ fn make(
     s
 }
 
+/// Brisk walk, s/km (5.5–5.0 km/h).
+const WALK_PACE: (f64, f64) = (655.0, 720.0);
+
 /// Easy pace so slow that running continuously under the HR cap is hard:
-/// jog/walk repeats (Galloway's run-walk). The walk breaks shrink as the
-/// easy pace gets faster.
+/// jog/walk repeats (Galloway's run-walk). The jog is at the speed where the
+/// HR × speed model reaches the cap, up to 40 s/km faster (the walk breaks
+/// keep HR from settling); the walk breaks shrink as the easy pace gets
+/// faster.
 fn run_walk(s: &mut Session, f: &Fitness) {
     let jog = if f.easy_pace >= 630.0 {
         2.0
@@ -379,14 +384,23 @@ fn run_walk(s: &mut Session, f: &Fitness) {
         5.0
     };
     let reps = (s.duration_s / 60.0 / (jog + 1.0)).round().max(3.0) as u32;
+    let jog_pace = (f.easy_pace - 40.0, f.easy_pace);
     s.steps = vec![
-        step(reps, "Trote leve", "Easy jog", jog * 60.0, None, Some(f.easy_hr_cap)),
-        step(reps, "Caminhada rápida", "Brisk walk", 60.0, None, None),
+        step(
+            reps,
+            "Trote leve",
+            "Easy jog",
+            jog * 60.0,
+            Some(jog_pace),
+            Some(f.easy_hr_cap),
+        ),
+        step(reps, "Caminhada rápida", "Brisk walk", 60.0, Some(WALK_PACE), None),
     ];
     s.duration_s = reps as f64 * (jog + 1.0) * 60.0;
-    if let Some(p) = s.pace {
-        s.distance_m = dist_for(s.duration_s, p);
-    }
+    s.distance_m = reps as f64 * (dist_for(jog * 60.0, jog_pace) + dist_for(60.0, WALK_PACE));
+    // average pace of the whole session, walks included
+    let avg = s.duration_s / (s.distance_m / 1000.0);
+    s.pace = Some((avg - 15.0, avg + 15.0));
 }
 
 /// What the queue needs to know about the plan sessions done so far.
@@ -627,6 +641,11 @@ mod tests {
         assert!(e.run_walk());
         assert_eq!(e.steps[0].duration_s, 180.0);
         assert_eq!(e.steps[0].hr_max, Some(154.0));
+        // a jog speed from the HR model (9:47/km = 6.1 km/h, up to 40 s/km faster) and a walk speed
+        assert_eq!(e.steps[0].pace, Some((547.0, 587.0)));
+        assert_eq!(e.steps[1].pace, Some(WALK_PACE));
+        let avg = e.duration_s / (e.distance_m / 1000.0);
+        assert!(avg > 547.0 && avg < 720.0, "{avg}");
         // once a week: no intervals
         assert!(q.iter().all(|s| s.kind != SessionKind::Intervals));
         // the long run is longer than the easy run and capped near the goal distance

@@ -153,3 +153,8 @@ Cada fase sai como uma versão (0.3, 0.4…), com testes e capturas atualizadas.
   leves. O mapa da jornada mostra marcos de FC quando a distância já foi alcançada. A tela Hoje
   mostra o próximo treino com "quando" (descanso depois de treino forte) e uma linha com os últimos
   treinos feitos e os próximos.
+- **v0.4.1 (09/11/2026):** "mais adulto" (pedido do usuário): saem XP, níveis e missões. Ficam a
+  avaliação de cada treino (3 estrelas com os motivos), a sequência semanal, as conquistas, o mapa
+  da jornada e a comemoração curta só em conquistas grandes. A corrida + caminhada passa a mostrar a
+  velocidade do trote (a do modelo FC × velocidade no limite de FC, até 40 s/km mais rápida) e da
+  caminhada (5,0–5,5 km/h), com o pace equivalente na rua.

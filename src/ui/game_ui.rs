@@ -1,9 +1,9 @@
-//! Game UI: level badge, stars, the post-run report card, the celebration
-//! animation and the Achievements page.
+//! Feedback UI: stars, the weekly streak, the post-run report card, the
+//! celebration animation and the Achievements page.
 
 use super::widgets::{self, weak};
 use super::{App, Page};
-use crate::coach::game::{self, Achievement, LEVELS, Level, Score};
+use crate::coach::game::{self, Achievement, Score};
 use crate::format;
 use eframe::egui::{self, Color32, RichText, Ui};
 use std::time::{Duration, Instant};
@@ -19,50 +19,37 @@ pub fn stars(ui: &mut Ui, n: u8, size: f32) {
     ui.label(RichText::new(stars_text(n)).size(size).color(GOLD));
 }
 
-/// Level name, XP bar and streak, compact (Today page and sidebar).
-pub fn level_card(ui: &mut Ui, g: &game::State) {
+/// Weekly streak and the last 10 weeks as medals, in one line.
+pub fn streak_card(ui: &mut Ui, g: &game::State) {
     widgets::card_frame(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            ui.label(RichText::new(format!("Lv {}", g.level.index + 1)).size(20.0).strong().color(GOLD));
-            ui.vertical(|ui| {
-                ui.label(RichText::new(g.level.name).size(16.0).strong());
-                let text = match g.level.next {
-                    Some(n) => format!("{} / {} XP", g.xp, n),
-                    None => format!("{} XP", g.xp),
-                };
-                widgets::progress(ui, g.level.fraction(), &text, g.level.next.is_none());
-                if let Some(n) = g.level.next {
-                    ui.label(weak(ui, trf!("faltam {} XP para o próximo nível", "{} XP to the next level", n - g.xp)).small());
-                }
-            });
-        });
-        ui.horizontal(|ui| {
             ui.label(RichText::new(format!("🔥 {}", g.streak)).size(16.0).strong().color(widgets::WARN));
-            ui.label(weak(ui, trf!(
-                "semana(s) seguida(s) com treino · recorde {}",
-                "week(s) in a row with a session · best {}",
-                g.best_streak
-            )));
+            ui.label(weak(
+                ui,
+                trf!(
+                    "semana(s) seguida(s) com treino do plano · recorde {}",
+                    "week(s) in a row with a plan session · best {}",
+                    g.best_streak
+                ),
+            ));
             widgets::help(
                 ui,
                 tr!(
-                    "Uma semana conta quando você faz pelo menos 1 treino do plano (com 2 ou mais, a medalha é dourada). Uma semana sem treino a cada 8 é perdoada; semanas marcadas como doente/viagem não contam.",
-                    "A week counts when you do at least 1 plan session (2 or more earn a gold medal). One week without a session in 8 is forgiven; weeks marked as sick/travel do not count."
+                    "Uma semana conta quando você faz pelo menos 1 treino do plano (com 2 ou mais, a marca é dourada). Uma semana sem treino a cada 8 é perdoada; semanas marcadas como doente/viagem não contam.",
+                    "A week counts when you do at least 1 plan session (2 or more make it gold). One week without a session in 8 is forgiven; weeks marked as sick/travel do not count."
                 ),
             );
-        });
-        // last 10 weeks as medals
-        ui.horizontal(|ui| {
+            ui.add_space(12.0);
             for w in g.weeks.iter().rev().take(10).collect::<Vec<_>>().into_iter().rev() {
                 let (txt, color, tip) = match (w.consistent, w.joker_used, w.two) {
                     (None, _, _) => ("◌", Color32::GRAY, tr!("doente/viagem: não conta", "sick/travel: not counted")),
                     (Some(true), _, true) => ("●", GOLD, tr!("2 ou mais treinos", "2 or more sessions")),
                     (Some(true), _, _) => ("●", widgets::GOOD, tr!("treinou", "trained")),
-                    (Some(false), true, _) => ("◐", widgets::WARN, tr!("perdoada (coringa)", "forgiven (joker)")),
+                    (Some(false), true, _) => ("◐", widgets::WARN, tr!("perdoada", "forgiven")),
                     (Some(false), false, _) => ("○", widgets::BAD, tr!("sem treino", "no session")),
                 };
-                ui.label(RichText::new(txt).size(18.0).color(color)).on_hover_text(trf!(
+                ui.label(RichText::new(txt).size(16.0).color(color)).on_hover_text(trf!(
                     "semana de {} · {} treino(s) · {tip}",
                     "week of {} · {} session(s) · {tip}",
                     format::date_short(w.start),
@@ -73,39 +60,9 @@ pub fn level_card(ui: &mut Ui, g: &game::State) {
     });
 }
 
-pub fn missions_card(ui: &mut Ui, g: &game::State) {
-    if g.missions.is_empty() {
-        return;
-    }
-    widgets::card_frame(ui).show(ui, |ui| {
-        ui.set_width(ui.available_width());
-        ui.horizontal(|ui| {
-            ui.label(weak(ui, tr!("Missões da semana", "This week's missions")).small());
-            widgets::help(
-                ui,
-                &trf!(
-                    "Tiradas do próprio plano. Cada missão completa vale {} XP.",
-                    "Taken from the plan itself. Each completed mission is worth {} XP.",
-                    game::XP_MISSION
-                ),
-            );
-        });
-        for m in &g.missions {
-            ui.horizontal(|ui| {
-                ui.label(RichText::new(if m.complete() { "✅" } else { "⬜" }).size(15.0));
-                ui.label(&m.text);
-                ui.label(weak(ui, format!("{}/{}", m.done.min(m.target), m.target)));
-            });
-        }
-    });
-}
-
 /// Stars + reasons of a session's score.
 pub fn score_details(ui: &mut Ui, s: &Score) {
-    ui.horizontal(|ui| {
-        stars(ui, s.stars(), 22.0);
-        ui.label(RichText::new(format!("+{} XP", s.xp)).strong().color(GOLD));
-    });
+    stars(ui, s.stars(), 22.0);
     for r in &s.reasons {
         if r.starts_with('★') {
             ui.label(RichText::new(r).color(ui.visuals().text_color()));
@@ -119,7 +76,6 @@ pub fn score_details(ui: &mut Ui, s: &Score) {
 pub struct ReportCard {
     pub activity_id: i64,
     pub score: Option<Score>,
-    pub level_up: Option<Level>,
     pub new_achievements: Vec<Achievement>,
     pub highlights: Vec<String>,
 }
@@ -166,23 +122,13 @@ pub fn report_card_window(app: &mut App, ctx: &egui::Context) {
                 }
                 None => {
                     ui.label(tr!(
-                        "Corrida fora do plano: bem-vinda, mas o que rende pontos é seguir o que o plano propôs.",
-                        "Run outside the plan: welcome, but what earns points is following what the plan proposed."
+                        "Corrida fora do plano: conta para a sua forma, mas não é avaliada contra um treino proposto.",
+                        "Run outside the plan: it counts for your fitness, but it is not rated against a proposed session."
                     ));
-                    ui.label(RichText::new(format!("+{} XP", game::XP_UNPLANNED)).color(GOLD));
                 }
             }
             for h in &card.highlights {
                 ui.label(RichText::new(format!("📈 {h}")).color(widgets::GOOD));
-            }
-            if let Some(l) = &card.level_up {
-                ui.add_space(6.0);
-                ui.label(
-                    RichText::new(trf!("🎉 Novo nível: {}!", "🎉 New level: {}!", l.name))
-                        .size(18.0)
-                        .strong()
-                        .color(GOLD),
-                );
             }
             const SHOWN: usize = 4;
             for ach in card.new_achievements.iter().take(SHOWN) {
@@ -286,66 +232,35 @@ pub fn show_page(app: &mut App, ui: &mut Ui) {
         widgets::empty_state(
             ui,
             tr!(
-                "A gamificação está desligada em Configurações.",
-                "Gamification is turned off in Settings."
+                "A avaliação dos treinos está desligada em Configurações.",
+                "Session feedback is turned off in Settings."
             ),
         );
         return;
     };
     egui::ScrollArea::vertical().auto_shrink(false).show(ui, |ui| {
-        ui.columns(2, |c| {
-            level_card(&mut c[0], &g);
-            missions_card(&mut c[1], &g);
-        });
-        egui::CollapsingHeader::new(tr!("Como ganhar pontos", "How to earn points")).show(ui, |ui| {
+        streak_card(ui, &g);
+        egui::CollapsingHeader::new(tr!("Como cada treino é avaliado", "How each session is rated")).show(ui, |ui| {
             for l in [
-                trf!(
-                    "Treino do plano feito no tamanho proposto (90% a 130% do tempo): {} XP + ★",
-                    "Plan session done at the proposed size (90% to 130% of the time): {} XP + ★",
-                    game::XP_DONE
+                tr!(
+                    "★ Feito: o treino do plano no tamanho proposto (90% a 130% do tempo).",
+                    "★ Done: the plan session at the proposed size (90% to 130% of the time)."
                 ),
-                trf!(
-                    "No esforço proposto (FC dentro do limite nas leves; pace no intervalo nas fortes): +{} XP + ★",
-                    "At the proposed effort (HR within the limit on easy runs; pace in range on hard ones): +{} XP + ★",
-                    game::XP_STAR
+                tr!(
+                    "★ Esforço: FC dentro do limite nas corridas leves (no máximo 10% do tempo acima); pace no intervalo nos treinos fortes.",
+                    "★ Effort: HR within the cap on easy runs (at most 10% of the time above); pace in range on hard sessions."
                 ),
-                trf!(
-                    "Objetivo da sessão (sem exagerar nas leves; blocos completos; teste completo): +{} XP + ★",
-                    "Session target (no overdoing on easy runs; all blocks; complete check): +{} XP + ★",
-                    game::XP_STAR
+                tr!(
+                    "★ Objetivo: sem exagerar nas leves; blocos completos; teste completo; meta atingida na tentativa.",
+                    "★ Target: no overdoing on easy runs; all blocks; complete check; goal reached on the attempt."
                 ),
-                trf!(
-                    "Teste de evolução completo: +{} XP · Meta atingida: +{} XP",
-                    "Progress check complete: +{} XP · Goal reached: +{} XP",
-                    game::XP_CHECK_BONUS,
-                    game::XP_GOAL_BONUS
-                ),
-                trf!(
-                    "Missão da semana / semana com treino: +{} XP",
-                    "Weekly mission / week with a session: +{} XP",
-                    game::XP_MISSION
-                ),
-                trf!(
-                    "Corrida fora do plano: {} XP. Correr mais ou mais forte que o proposto não rende pontos extras.",
-                    "Run outside the plan: {} XP. Running more or harder than proposed earns no extra points.",
-                    game::XP_UNPLANNED
+                tr!(
+                    "Correr mais ou mais forte que o proposto não melhora a avaliação.",
+                    "Running more or harder than proposed does not improve the rating."
                 ),
             ] {
-                ui.label(format!("• {l}"));
+                ui.label(l);
             }
-            ui.add_space(4.0);
-            ui.label(RichText::new(tr!("Níveis", "Levels")).strong());
-            ui.horizontal_wrapped(|ui| {
-                for (i, (xp, pt, en)) in LEVELS.iter().enumerate() {
-                    let name = if crate::i18n::pt() { pt } else { en };
-                    let reached = g.xp >= *xp;
-                    widgets::chip(
-                        ui,
-                        &format!("{} · {name} · {xp} XP", i + 1),
-                        if reached { GOLD } else { Color32::GRAY },
-                    );
-                }
-            });
         });
         widgets::section(ui, tr!("Troféus", "Trophies"));
         let unlocked = g.achievements.iter().filter(|a| a.unlocked.is_some()).count();

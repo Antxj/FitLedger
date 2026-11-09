@@ -113,7 +113,7 @@ pub struct App {
     shots: Vec<(String, Page, Option<activity::Tab>)>,
     /// Goal, fitness, projection and sessions; None until a goal exists.
     pub coach: Option<CoachState>,
-    /// Points, levels, streak, missions and achievements (None when turned off).
+    /// Session ratings, streak and achievements (None when turned off).
     pub game: Option<crate::coach::game::State>,
     /// Shown after an import.
     pub report_card: Option<game_ui::ReportCard>,
@@ -224,7 +224,7 @@ impl App {
         self.refresh_game();
     }
 
-    /// Recomputes points, streak, missions and achievements from the data.
+    /// Recomputes session ratings, streak and achievements from the data.
     pub fn refresh_game(&mut self) {
         use crate::coach::game;
         if !self.settings.game {
@@ -260,8 +260,8 @@ impl App {
     }
 
     /// After an import: the report card of the latest run, new achievements
-    /// and a celebration for a level-up or a big achievement.
-    fn after_import(&mut self, imported: &[(String, i64)], level_before: Option<usize>) {
+    /// and a celebration for a big achievement.
+    fn after_import(&mut self, imported: &[(String, i64)]) {
         use crate::coach::game;
         let Some(g) = self.game.clone() else { return };
         let mut seen = game::load_seen(&self.db);
@@ -275,8 +275,7 @@ impl App {
             seen.insert(a.id.to_string());
         }
         game::save_seen(&self.db, &seen);
-        let level_up = level_before.filter(|b| g.level.index > *b).map(|_| g.level.clone());
-        if (level_up.is_some() || new.iter().any(|a| a.major)) && self.settings.celebrations {
+        if new.iter().any(|a| a.major) && self.settings.celebrations {
             self.celebration = Some(game_ui::Celebration::new(crate::db::now() as u64));
         }
         // the latest imported run gets the report card
@@ -325,7 +324,6 @@ impl App {
         self.report_card = Some(game_ui::ReportCard {
             activity_id: id,
             score,
-            level_up,
             new_achievements: new,
             highlights,
         });
@@ -532,12 +530,11 @@ impl App {
             j.finished.take()
         };
         let Some(result) = finished else { return };
-        let level_before = self.game.as_ref().map(|g| g.level.index);
         self.reload();
         match result {
             JobResult::Import(r) => {
                 if !r.imported.is_empty() && self.page != Page::Onboarding {
-                    self.after_import(&r.imported, level_before);
+                    self.after_import(&r.imported);
                 }
                 let text = trf!("Importação: {}", "Import: {}", r.summary());
                 if r.errors.is_empty() {
@@ -854,7 +851,7 @@ impl App {
             if name == "report-card"
                 && let Some(id) = self.data.activities.first().map(|a| a.id)
             {
-                self.after_import(&[(String::new(), id)], None);
+                self.after_import(&[(String::new(), id)]);
             }
             if let Some(t) = tab {
                 self.pages.activity.tab = t;
