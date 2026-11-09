@@ -1,4 +1,4 @@
-//! How the last weeks went, and what the coach changes because of it.
+//! How the last runs went, and what the coach changes because of it.
 //! Every adjustment carries the data that triggered it.
 
 use super::fitness::day;
@@ -10,7 +10,7 @@ use chrono::{Duration, NaiveDate};
 use serde::{Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 
-/// Normal week-to-week growth of the running time (≤ 10%).
+/// Normal progression (easy runs +5%, long run +10% at a time).
 pub const GROWTH: f64 = 1.08;
 /// Growth when easy runs are too hard.
 pub const GROWTH_CAREFUL: f64 = 1.04;
@@ -24,41 +24,48 @@ pub struct Tracked {
     pub activity_id: Option<i64>,
 }
 
-/// Links runs to planned sessions (same day first, then ±1 day) and sets the
-/// status of every session up to today. Returns the ids that changed.
-pub fn match_runs(sessions: &mut [Tracked], runs: &[Activity], today: NaiveDate) -> Vec<i64> {
+/// Links new runs to the queue: every run after the last one already linked
+/// (and on or after `since`, the goal start) fulfils the next planned session,
+/// in order. There are no fixed days, so nothing is ever "missed". Returns
+/// the ids that changed.
+pub fn match_runs(sessions: &mut [Tracked], runs: &[Activity], since: NaiveDate) -> Vec<i64> {
     let mut changed = Vec::new();
-    let mut used: HashSet<i64> = sessions.iter().filter_map(|s| s.activity_id).collect();
+    let by_id: HashMap<i64, &Activity> = runs.iter().map(|r| (r.id, r)).collect();
     // forget links to runs that no longer exist
-    let ids: HashSet<i64> = runs.iter().map(|r| r.id).collect();
     for s in sessions.iter_mut() {
         if let Some(a) = s.activity_id
-            && !ids.contains(&a)
+            && !by_id.contains_key(&a)
         {
             s.activity_id = None;
-            s.status = Status::Planned;
-            used.remove(&a);
             changed.push(s.id);
         }
     }
-    for pass in 0..2 {
-        for s in sessions
-            .iter_mut()
-            .filter(|s| s.activity_id.is_none() && s.session.date <= today)
-        {
-            let found = runs.iter().filter(|r| !used.contains(&r.id)).find(|r| {
-                let diff = (day(r) - s.session.date).num_days().abs();
-                if pass == 0 { diff == 0 } else { diff == 1 }
-            });
-            if let Some(r) = found {
-                used.insert(r.id);
-                s.activity_id = Some(r.id);
-                changed.push(s.id);
-            }
-        }
+    let used: HashSet<i64> = sessions.iter().filter_map(|s| s.activity_id).collect();
+    let last = used.iter().filter_map(|id| by_id.get(id)).map(|r| r.start_time).max();
+    let mut new: Vec<&Activity> = runs
+        .iter()
+        .filter(|r| !used.contains(&r.id) && day(r) >= since && last.is_none_or(|t| r.start_time > t))
+        .collect();
+    new.sort_by_key(|r| r.start_time);
+    let mut open: Vec<usize> = (0..sessions.len())
+        .filter(|&i| sessions[i].activity_id.is_none())
+        .collect();
+    open.sort_by_key(|&i| (sessions[i].session.date, sessions[i].id));
+    for (r, i) in new.into_iter().zip(open) {
+        let s = &mut sessions[i];
+        s.activity_id = Some(r.id);
+        s.session.date = day(r);
+        changed.push(s.id);
     }
     for s in sessions.iter_mut() {
-        let new = match s.activity_id.and_then(|id| runs.iter().find(|r| r.id == id)) {
+        // a done session carries the day of its run (links made by older versions may not)
+        if let Some(r) = s.activity_id.and_then(|id| by_id.get(&id))
+            && s.session.date != day(r)
+        {
+            s.session.date = day(r);
+            changed.push(s.id);
+        }
+        let new = match s.activity_id.and_then(|id| by_id.get(&id)) {
             Some(r) => {
                 let planned = s.session.duration_s.max(1.0);
                 let done = r.duration().unwrap_or(0.0);
@@ -68,7 +75,6 @@ pub fn match_runs(sessions: &mut [Tracked], runs: &[Activity], today: NaiveDate)
                     Status::Partial
                 }
             }
-            None if s.session.date < today => Status::Missed,
             None => Status::Planned,
         };
         if new != s.status {
@@ -85,15 +91,51 @@ pub fn match_runs(sessions: &mut [Tracked], runs: &[Activity], today: NaiveDate)
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]
 pub enum Note {
-    OnTrack { done: usize, planned: usize },
-    Missed { missed: usize, planned: usize },
-    EasyTooHard { hard: usize, easy: usize },
-    HighDrift { pct: f64, date: NaiveDate },
-    Fatigue { date: NaiveDate },
+    /// Fixed-day plans (before 0.4); kept so old log entries still read.
+    OnTrack {
+        done: usize,
+        planned: usize,
+    },
+    Missed {
+        missed: usize,
+        planned: usize,
+    },
+    Steady {
+        runs: usize,
+    },
+    Comeback {
+        days: i64,
+    },
+    Spike {
+        minutes: f64,
+        usual: f64,
+    },
+    Rhythm {
+        per_week: f64,
+        weeks: u32,
+        more: u32,
+        more_weeks: u32,
+    },
+    EasyTooHard {
+        hard: usize,
+        easy: usize,
+    },
+    HighDrift {
+        pct: f64,
+        date: NaiveDate,
+    },
+    Fatigue {
+        date: NaiveDate,
+    },
     NoData,
-    GoalReached { date: NaiveDate },
+    GoalReached {
+        date: NaiveDate,
+    },
     GoalChanged,
-    Ambitious { weeks_needed: u32, weeks_available: u32 },
+    Ambitious {
+        weeks_needed: u32,
+        weeks_available: u32,
+    },
 }
 
 impl Note {
@@ -107,9 +149,28 @@ impl Note {
                 "{missed} de {planned} treinos não foram feitos nas últimas 2 semanas. O volume não aumenta esta semana; nada é \"compensado\".",
                 "{missed} of {planned} sessions were missed in the last 2 weeks. Volume does not increase this week; nothing is \"made up\"."
             ),
+            Note::Steady { runs } => trf!(
+                "Você correu {runs} vez(es) nas últimas 2 semanas. O próximo treino segue a progressão normal.",
+                "You ran {runs} time(s) in the last 2 weeks. The next session follows the normal progression."
+            ),
+            Note::Comeback { days } => trf!(
+                "Faz {days} dias desde a última corrida: o próximo treino é um pouco menor, para retomar com segurança.",
+                "It has been {days} days since your last run: the next session is a bit shorter, to come back safely."
+            ),
+            Note::Spike { minutes, usual } => trf!(
+                "{} min de corrida nos últimos 7 dias, bem acima do seu normal (~{} min/semana). O próximo treino fica mais leve.",
+                "{} min of running in the last 7 days, well above your usual (~{} min/week). The next session is lighter.",
+                minutes.round(),
+                usual.round()
+            ),
+            Note::Rhythm { per_week, weeks, more, more_weeks } => trf!(
+                "Você tem corrido ~{}×/semana; nesse ritmo, a estimativa é de {weeks} semanas. Com {more}×/semana, cairia para ~{more_weeks}.",
+                "You have been running ~{}×/week; at that rate, the estimate is {weeks} weeks. At {more}×/week it would drop to ~{more_weeks}.",
+                format::num(*per_week, 1)
+            ),
             Note::EasyTooHard { hard, easy } => trf!(
-                "{hard} de {easy} corridas leves passaram do limite de FC. Corra mais devagar nelas (ou caminhe um pouco): o crescimento do volume ficou mais lento.",
-                "{hard} of {easy} easy runs went over the HR limit. Run them slower (or walk a little): volume now grows more slowly."
+                "{hard} de {easy} corridas leves passaram do limite de FC. Corra mais devagar nelas (ou caminhe um pouco): os treinos crescem mais devagar até isso melhorar.",
+                "{hard} of {easy} easy runs went over the HR limit. Run them slower (or walk a little): sessions grow more slowly until that improves."
             ),
             Note::HighDrift { pct, date } => trf!(
                 "Deriva cardíaca de {}% no longão de {}. O longão não aumenta até ela cair.",
@@ -118,8 +179,8 @@ impl Note {
                 format::date(*date)
             ),
             Note::Fatigue { date } => trf!(
-                "Você registrou cansaço alto em {}. Esta semana fica mais leve.",
-                "You logged high fatigue on {}. This week is lighter.",
+                "Você registrou cansaço alto em {}. O próximo treino fica mais leve.",
+                "You logged high fatigue on {}. The next session is lighter.",
                 format::date(*date)
             ),
             Note::NoData => tr!(
@@ -144,6 +205,8 @@ impl Note {
         matches!(
             self,
             Note::Missed { .. }
+                | Note::Comeback { .. }
+                | Note::Spike { .. }
                 | Note::EasyTooHard { .. }
                 | Note::HighDrift { .. }
                 | Note::Fatigue { .. }
@@ -194,35 +257,33 @@ fn share_above_easy(m: &Metrics) -> Option<f64> {
 pub fn review(sessions: &[Tracked], runs: &[Activity], metrics: &HashMap<i64, Metrics>, today: NaiveDate) -> Adjust {
     let mut adj = Adjust::default();
     let from = today - Duration::days(14);
-    let past: Vec<&Tracked> = sessions
-        .iter()
-        .filter(|s| s.session.date >= from && s.session.date < today)
-        .collect();
     let recent_runs: Vec<&Activity> = runs.iter().filter(|r| day(r) >= from && day(r) <= today).collect();
     if runs.is_empty() {
         adj.notes.push(Note::NoData);
         return adj;
     }
 
-    let missed = past.iter().filter(|s| s.status == Status::Missed).count();
-    let done = past
-        .iter()
-        .filter(|s| matches!(s.status, Status::Done | Status::Partial))
-        .count();
-    if past.len() >= 2 && missed * 2 >= past.len() {
+    // a long break: the next session is smaller (the plan sizes it)
+    if let Some(last) = runs.iter().map(day).filter(|d| *d <= today).max()
+        && (today - last).num_days() > 14
+    {
         adj.growth = 1.0;
-        adj.notes.push(Note::Missed {
-            missed,
-            planned: past.len(),
+        adj.notes.push(Note::Comeback {
+            days: (today - last).num_days(),
         });
-        for s in past.iter().filter(|s| s.status == Status::Missed) {
-            adj.evidence.push(format!(
-                "{} · {} · {}",
-                format::date(s.session.date),
-                s.session.kind.label(),
-                Status::Missed.label()
-            ));
-        }
+    }
+
+    // a spike: much more running in the last 7 days than usual
+    let minutes = |a: i64, b: i64| -> f64 {
+        runs.iter()
+            .filter(|r| day(r) > today - Duration::days(a) && day(r) <= today - Duration::days(b))
+            .map(|r| r.duration().unwrap_or(0.0) / 60.0)
+            .sum()
+    };
+    let (last7, usual) = (minutes(7, 0), minutes(28, 7) / 3.0);
+    if last7 > (usual * 1.5).max(90.0) {
+        adj.deload_now = true;
+        adj.notes.push(Note::Spike { minutes: last7, usual });
     }
 
     // easy runs: planned as easy/long, or unplanned runs
@@ -302,10 +363,9 @@ pub fn review(sessions: &[Tracked], runs: &[Activity], metrics: &HashMap<i64, Me
         ));
     }
 
-    if adj.notes.is_empty() && !past.is_empty() {
-        adj.notes.push(Note::OnTrack {
-            done,
-            planned: past.len(),
+    if adj.notes.is_empty() && !recent_runs.is_empty() {
+        adj.notes.push(Note::Steady {
+            runs: recent_runs.len(),
         });
     }
     adj
@@ -354,37 +414,46 @@ mod tests {
     }
 
     #[test]
-    fn matching_and_status() {
-        let today = d("2026-10-19");
+    fn runs_fulfil_the_queue_in_order() {
+        let since = d("2026-10-19");
         let mut s = vec![
-            sess(1, "2026-10-13", SessionKind::Easy),
-            sess(2, "2026-10-15", SessionKind::Easy),
-            sess(3, "2026-10-18", SessionKind::Long),
-            sess(4, "2026-10-20", SessionKind::Easy),
+            sess(1, "2026-10-20", SessionKind::Easy),
+            sess(2, "2026-10-22", SessionKind::Long),
+            sess(3, "2026-10-24", SessionKind::Easy),
         ];
-        let runs = vec![run(10, "2026-10-13", 1900.0), run(11, "2026-10-16", 600.0)];
-        match_runs(&mut s, &runs, today);
+        // a run before the goal is not part of the plan; the others fill the
+        // queue in order, whatever the day
+        let runs = vec![
+            run(9, "2026-10-10", 1800.0),
+            run(10, "2026-10-28", 1900.0),
+            run(11, "2026-11-02", 600.0),
+        ];
+        match_runs(&mut s, &runs, since);
         assert_eq!((s[0].status, s[0].activity_id), (Status::Done, Some(10)));
-        assert_eq!((s[1].status, s[1].activity_id), (Status::Partial, Some(11))); // one day late and short
-        assert_eq!(s[2].status, Status::Missed);
-        assert_eq!(s[3].status, Status::Planned);
+        assert_eq!(s[0].session.date, d("2026-10-28"));
+        assert_eq!((s[1].status, s[1].activity_id), (Status::Partial, Some(11)));
+        assert_eq!((s[2].status, s[2].activity_id), (Status::Planned, None));
+        // nothing is ever missed
+        assert!(s.iter().all(|t| t.status != Status::Missed));
         // the run is deleted: link and status go back
-        let changed = match_runs(&mut s, &runs[..1], today);
+        let changed = match_runs(&mut s, &runs[..2], since);
         assert!(changed.contains(&2));
-        assert_eq!(s[1].status, Status::Missed);
+        assert_eq!(s[1].status, Status::Planned);
+        // an old run imported late does not take the queue
+        let mut s2 = vec![sess(5, "2026-11-10", SessionKind::Easy)];
+        s2[0].activity_id = None;
+        let mut linked = sess(4, "2026-11-05", SessionKind::Easy);
+        linked.activity_id = Some(20);
+        s2.insert(0, linked);
+        let runs2 = vec![run(20, "2026-11-05", 1800.0), run(21, "2026-11-01", 1800.0)];
+        match_runs(&mut s2, &runs2, since);
+        assert_eq!(s2[1].activity_id, None);
     }
 
     #[test]
-    fn missed_sessions_stop_growth_and_easy_too_hard_slows_it() {
+    fn easy_too_hard_slows_growth_and_breaks_are_noticed() {
         let today = d("2026-10-19");
-        let mut s = vec![
-            sess(1, "2026-10-08", SessionKind::Easy),
-            sess(2, "2026-10-10", SessionKind::Easy),
-            sess(3, "2026-10-13", SessionKind::Easy),
-            sess(4, "2026-10-15", SessionKind::Easy),
-        ];
         let runs = vec![run(10, "2026-10-08", 1800.0), run(11, "2026-10-10", 1800.0)];
-        match_runs(&mut s, &runs, today);
         let mut metrics = HashMap::new();
         for id in [10, 11] {
             metrics.insert(
@@ -395,16 +464,24 @@ mod tests {
                 },
             );
         }
-        let a = review(&s, &runs, &metrics, today);
-        assert_eq!(a.growth, 1.0);
-        assert!(
-            a.notes
-                .iter()
-                .any(|n| matches!(n, Note::Missed { missed: 2, planned: 4 }))
-        );
+        let a = review(&[], &runs, &metrics, today);
+        assert_eq!(a.growth, GROWTH_CAREFUL);
         assert!(a.notes.iter().any(|n| matches!(n, Note::EasyTooHard { .. })));
         assert!(!a.evidence.is_empty());
         assert!(a.notes.iter().all(|n| !n.text().is_empty()));
+        // three weeks later, nothing new: a comeback
+        let a = review(&[], &runs, &metrics, d("2026-11-01"));
+        assert!(a.notes.iter().any(|n| matches!(n, Note::Comeback { days: 22 })));
+        assert_eq!(a.growth, 1.0);
+    }
+
+    #[test]
+    fn a_load_spike_makes_the_next_session_lighter() {
+        let today = d("2026-10-19");
+        let runs: Vec<Activity> = (0..4).map(|i| run(i, &format!("2026-10-1{}", 5 + i), 2400.0)).collect();
+        let a = review(&[], &runs, &HashMap::new(), today);
+        assert!(a.deload_now);
+        assert!(a.notes.iter().any(|n| matches!(n, Note::Spike { .. })));
     }
 
     #[test]

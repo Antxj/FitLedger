@@ -1,12 +1,11 @@
-//! Home: today's session, goal progress, this week, coach notes, last run.
+//! Home: the next session (and when), goal progress, the queue, coach notes,
+//! last run.
 
 use super::widgets::{self, weak};
 use super::{App, Page};
 use crate::coach::adapt::Tracked;
-use crate::coach::fitness::day;
-use crate::coach::{SessionKind, Status, week_start};
+use crate::coach::{SessionKind, Status};
 use crate::format;
-use chrono::Duration;
 use eframe::egui::{self, Color32, RichText, Ui};
 
 pub fn kind_color(k: SessionKind) -> Color32 {
@@ -56,40 +55,52 @@ pub fn session_details(ui: &mut Ui, t: &Tracked) {
         );
     });
     if let Some(p) = s.pace_text() {
-        ui.label(RichText::new(trf!("Pace: {}", "Pace: {}", p)).color(widgets::SPEED));
+        let text = if s.run_walk() {
+            trf!(
+                "Pace médio, com as caminhadas: {}",
+                "Average pace, walks included: {}",
+                p
+            )
+        } else {
+            trf!("Pace: {}", "Pace: {}", p)
+        };
+        ui.label(RichText::new(text).color(widgets::SPEED));
     }
-    if !s.steps.is_empty() {
-        egui::Grid::new(("steps", t.id))
-            .striped(true)
-            .num_columns(4)
-            .show(ui, |ui| {
-                for st in &s.steps {
-                    ui.label(if st.repeat > 1 {
-                        format!("{}×", st.repeat)
-                    } else {
-                        String::new()
-                    });
-                    ui.label(st.label());
-                    ui.label(format::duration(st.duration_s));
-                    let mut extra = Vec::new();
-                    if let Some((a, b)) = st.pace {
-                        extra.push(format!(
-                            "{}–{}/km · {}–{} km/h",
-                            format::pace(a),
-                            format::pace(b),
-                            format::num(format::pace_to_kmh(b), 1),
-                            format::num(format::pace_to_kmh(a), 1)
-                        ));
-                    }
-                    if let Some(h) = st.hr_max {
-                        extra.push(format!("≤ {} bpm", h.round()));
-                    }
-                    ui.label(weak(ui, extra.join(" · ")));
-                    ui.end_row();
-                }
-            });
+    // one wrapped line per block (a grid would not wrap and widens the column)
+    for st in &s.steps {
+        let mut parts = vec![format!(
+            "{}{} · {}",
+            if st.repeat > 1 {
+                format!("{}× ", st.repeat)
+            } else {
+                String::new()
+            },
+            st.label(),
+            format::duration(st.duration_s)
+        )];
+        if let Some((a, b)) = st.pace {
+            parts.push(format!(
+                "{}–{}/km · {}–{} km/h",
+                format::pace(a),
+                format::pace(b),
+                format::num(format::pace_to_kmh(b), 1),
+                format::num(format::pace_to_kmh(a), 1)
+            ));
+        }
+        if let Some(h) = st.hr_max {
+            parts.push(format!("≤ {} bpm", h.round()));
+        }
+        ui.label(RichText::new(format!("• {}", parts.join(" · "))).small());
     }
+    let run_walk_tip = s.run_walk().then(|| {
+        trf!(
+            "Corrida + caminhada: trote leve com FC até {} bpm e caminhe 1 minuto entre os blocos (se a FC passar antes, caminhe antes). É o que deixa o coração trabalhar na zona certa enquanto ele fica mais eficiente; as caminhadas diminuem conforme a FC no mesmo ritmo cai.",
+            "Run + walk: easy jog with HR up to {} bpm and a 1-minute walk between blocks (walk earlier if HR goes over). It keeps the heart in the right zone while it gets more efficient; walks shrink as HR at the same pace drops.",
+            s.hr_max.unwrap_or(0.0).round()
+        )
+    });
     let tip = match s.kind {
+        _ if run_walk_tip.is_some() => run_walk_tip.as_deref().unwrap_or_default(),
         SessionKind::Easy => tr!(
             "Devagar de verdade: dá para conversar. Se a FC passar do limite, diminua o ritmo ou caminhe um pouco.",
             "Truly easy: you can talk. If HR goes over the limit, slow down or walk for a bit."
@@ -111,8 +122,8 @@ pub fn session_details(ui: &mut Ui, t: &Tracked) {
             "A test to measure progress: always the same pace, ideally on the treadmill at the same incline. The app compares HR with previous checks."
         ),
         SessionKind::GoalAttempt => tr!(
-            "Hoje é o dia da meta. Comece controlado e acelere no fim se der.",
-            "Today is goal day. Start controlled and speed up at the end if you can."
+            "A tentativa da meta: descansado, comece controlado e acelere no fim se der.",
+            "The goal attempt: rested, start controlled and speed up at the end if you can."
         ),
     };
     ui.label(weak(ui, tip).small().italics());
@@ -138,8 +149,8 @@ fn content(app: &mut App, ui: &mut Ui) {
             ui.label(weak(
                 ui,
                 tr!(
-                    "Diga a distância, e se quiser o tempo e/ou a FC média, e quantos dias por semana você corre. O FitLedger monta o cronograma e o ajusta a cada corrida importada.",
-                    "Tell the distance, optionally the time and/or the average HR, and how many days a week you run. FitLedger builds the schedule and adjusts it after every imported run."
+                    "Diga a distância e, se quiser, o tempo e/ou a FC média. Sem dias fixos: o FitLedger propõe o próximo treino e o ajusta a cada corrida importada.",
+                    "Tell the distance and, optionally, the time and/or the average HR. No fixed days: FitLedger proposes the next session and adjusts it after every imported run."
                 ),
             ));
             if ui.button(RichText::new(tr!("🎯 Definir meta", "🎯 Set goal")).strong()).clicked() {
@@ -162,33 +173,63 @@ fn content(app: &mut App, ui: &mut Ui) {
         );
     }
 
+    let done_today: Vec<Tracked> = c.done_on(today).into_iter().cloned().collect();
+    let mut open_run = None;
     ui.columns(2, |cols| {
-        // today's (or the next) session
+        // the next session, and when
         let ui = &mut cols[0];
         widgets::card_frame(ui).show(ui, |ui| {
             ui.set_width(ui.available_width());
-            let todays = c.today(today);
-            let shown: Vec<&Tracked> = if todays.is_empty() {
-                c.next_session(today).into_iter().collect()
-            } else {
-                todays
-            };
-            match shown.first() {
+            for t in &done_today {
+                ui.horizontal(|ui| {
+                    ui.label(
+                        RichText::new(trf!("✔ Hoje: {} feito", "✔ Today: {} done", t.session.kind.label()))
+                            .color(widgets::GOOD)
+                            .strong(),
+                    );
+                    if let Some(sc) = app.game.as_ref().and_then(|g| g.scores.get(&t.id)) {
+                        ui.label(RichText::new(super::game_ui::stars_text(sc.stars())).color(super::game_ui::GOLD));
+                    }
+                    if let Some(id) = t.activity_id
+                        && ui.link(tr!("ver", "see")).clicked()
+                    {
+                        open_run = Some(id);
+                    }
+                });
+            }
+            match c.next_session() {
                 None => {
                     ui.label(weak(ui, tr!("Nenhum treino planejado.", "No session planned.")));
                 }
                 Some(t) => {
-                    let label = if t.session.date == today {
-                        tr!("Treino de hoje", "Today's session").to_string()
+                    let after_hard = done_today
+                        .iter()
+                        .any(|d| d.session.kind == SessionKind::Long || d.session.kind.is_hard());
+                    let when = if t.session.date <= today {
+                        tr!(
+                            "Próximo treino · quando puder, hoje já dá",
+                            "Next session · whenever you can, today is fine"
+                        )
+                        .to_string()
+                    } else if t.session.date == today + chrono::Duration::days(1) {
+                        if after_hard || !done_today.is_empty() {
+                            tr!(
+                                "Próximo treino · a partir de amanhã (hoje, descanso)",
+                                "Next session · from tomorrow (rest today)"
+                            )
+                            .to_string()
+                        } else {
+                            tr!("Próximo treino · a partir de amanhã", "Next session · from tomorrow").to_string()
+                        }
                     } else {
                         trf!(
-                            "Hoje é descanso. Próximo treino: {} {}",
-                            "Rest day today. Next session: {} {}",
+                            "Próximo treino · a partir de {} {} (descanso antes)",
+                            "Next session · from {} {} (rest first)",
                             format::weekday_short(t.session.date),
                             format::date_short(t.session.date)
                         )
                     };
-                    ui.label(weak(ui, label).small());
+                    ui.label(weak(ui, when).small());
                     ui.horizontal(|ui| {
                         ui.label(
                             RichText::new(t.session.kind.label())
@@ -196,14 +237,9 @@ fn content(app: &mut App, ui: &mut Ui) {
                                 .strong()
                                 .color(kind_color(t.session.kind)),
                         );
-                        widgets::chip(ui, t.status.label(), status_color(t.status));
+                        widgets::chip(ui, t.session.phase.label(), widgets::ACCENT);
                     });
                     session_details(ui, t);
-                    if let Some(id) = t.activity_id
-                        && ui.link(tr!("Ver a corrida →", "See the run →")).clicked()
-                    {
-                        app.go(Page::Activity(id));
-                    }
                 }
             }
         });
@@ -252,7 +288,7 @@ fn content(app: &mut App, ui: &mut Ui) {
     }
     super::game_ui::journey(ui, &c, &app.data.activities);
     ui.add_space(8.0);
-    week_strip(app, ui, &c, today);
+    timeline(app, ui, &c);
     ui.add_space(8.0);
     // coach notes
     if !c.adjust.notes.is_empty() {
@@ -277,27 +313,41 @@ fn content(app: &mut App, ui: &mut Ui) {
         last_run(app, &mut cols[0], Some(&c));
         fitness_card(&mut cols[1], &c);
     });
+    if let Some(id) = open_run {
+        app.go(Page::Activity(id));
+    }
 }
 
-fn week_strip(app: &mut App, ui: &mut Ui, c: &crate::coach::store::CoachState, today: chrono::NaiveDate) {
-    let ws = week_start(today);
+/// The last plan sessions done and the next ones, left to right.
+fn timeline(app: &mut App, ui: &mut Ui, c: &crate::coach::store::CoachState) {
+    let mut done: Vec<&Tracked> = c.sessions.iter().filter(|t| t.activity_id.is_some()).collect();
+    done.sort_by_key(|t| (t.session.date, t.id));
+    let done: Vec<&Tracked> = done.into_iter().rev().take(2).rev().collect();
+    let queue = c.queue();
     let mut open = None;
     widgets::card_frame(ui).show(ui, |ui| {
         ui.set_width(ui.available_width());
         ui.horizontal(|ui| {
-            ui.label(weak(ui, tr!("Esta semana", "This week")).small());
+            ui.label(weak(ui, tr!("Treinos", "Sessions")).small());
+            widgets::help(
+                ui,
+                tr!(
+                    "Sem dias fixos: corra quando puder. Cada corrida importada cumpre o próximo treino da fila e a fila é refeita com base no que você fez.",
+                    "No fixed days: run whenever you can. Each imported run fulfils the next session of the queue, and the queue is rebuilt from what you did."
+                ),
+            );
             if ui.link(tr!("ver plano completo →", "see the full plan →")).clicked() {
                 app.go(Page::Plan);
             }
         });
-        let w = (ui.available_width() - 6.0 * 8.0) / 7.0;
+        let n = (done.len() + queue.len()).max(1);
+        let w = (ui.available_width() - (n as f32 - 1.0) * 8.0) / n as f32;
         ui.horizontal(|ui| {
-            for k in 0..7 {
-                let d = ws + Duration::days(k);
-                let sessions: Vec<&Tracked> = c.sessions.iter().filter(|t| t.session.date == d).collect();
-                let runs: Vec<_> = app.data.activities.iter().filter(|a| day(a) == d).collect();
+            for (i, t) in done.iter().chain(queue.iter()).enumerate() {
+                let is_done = t.activity_id.is_some();
+                let next = !is_done && i == done.len();
                 egui::Frame::new()
-                    .fill(if d == today {
+                    .fill(if next {
                         widgets::ACCENT.gamma_multiply(0.15)
                     } else {
                         ui.visuals().faint_bg_color
@@ -308,29 +358,45 @@ fn week_strip(app: &mut App, ui: &mut Ui, c: &crate::coach::store::CoachState, t
                         ui.set_width(w - 12.0);
                         ui.set_min_height(64.0);
                         ui.vertical(|ui| {
+                            let head = if is_done {
+                                trf!(
+                                    "Feito · {} {}",
+                                    "Done · {} {}",
+                                    format::weekday_short(t.session.date),
+                                    format::date_short(t.session.date)
+                                )
+                            } else if next {
+                                tr!("Próximo", "Next").into()
+                            } else if i == done.len() + 1 {
+                                tr!("Depois", "Then").into()
+                            } else {
+                                tr!("Em seguida", "After that").into()
+                            };
+                            ui.label(RichText::new(head).small().strong());
                             ui.label(
-                                RichText::new(format!("{} {}", format::weekday_short(d), d.format("%d")))
-                                    .small()
-                                    .strong(),
-                            );
-                            if sessions.is_empty() && runs.is_empty() {
-                                ui.label(weak(ui, tr!("descanso", "rest")).small());
-                            }
-                            for t in sessions {
-                                let txt = RichText::new(format!(
+                                RichText::new(format!(
                                     "{} · {}",
                                     t.session.kind.label(),
                                     format::duration(t.session.duration_s)
                                 ))
                                 .small()
-                                .color(kind_color(t.session.kind));
-                                ui.label(txt);
-                                ui.label(RichText::new(t.status.label()).small().color(status_color(t.status)));
-                                if let Some(id) = t.activity_id
-                                    && ui.small_button(tr!("abrir", "open")).clicked()
-                                {
-                                    open = Some(id);
-                                }
+                                .color(kind_color(t.session.kind)),
+                            );
+                            if is_done {
+                                ui.horizontal(|ui| {
+                                    if let Some(sc) = app.game.as_ref().and_then(|g| g.scores.get(&t.id)) {
+                                        ui.label(
+                                            RichText::new(super::game_ui::stars_text(sc.stars()))
+                                                .small()
+                                                .color(super::game_ui::GOLD),
+                                        );
+                                    }
+                                    if ui.small_button(tr!("abrir", "open")).clicked() {
+                                        open = t.activity_id;
+                                    }
+                                });
+                            } else {
+                                ui.label(weak(ui, format!("≈ {}", format::km(t.session.distance_m))).small());
                             }
                         });
                     });
@@ -453,7 +519,19 @@ Estimated HR: the HR you would have today at goal pace; the trend shows how much
                     tr!("Maior corrida (28 dias)", "Longest run (28 days)"),
                     format::km(f.longest_m),
                 );
-                row(ui, tr!("Corridas (28 dias)", "Runs (28 days)"), f.runs_28d.to_string());
+                row(
+                    ui,
+                    tr!("Corridas (28 dias)", "Runs (28 days)"),
+                    trf!(
+                        "{} · ~{}×/semana",
+                        "{} · ~{}×/week",
+                        f.runs_28d,
+                        format::num(f.runs_per_week, 1)
+                    ),
+                );
+                if f.typical_s > 0.0 {
+                    row(ui, tr!("Treino típico (últimas 3)", "Typical run (last 3)"), format::duration(f.typical_s));
+                }
                 if let Some(p) = f.predicted_time {
                     row(
                         ui,

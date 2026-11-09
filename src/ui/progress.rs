@@ -710,23 +710,28 @@ fn volume(app: &mut App, ui: &mut Ui) {
         o.height = 200.0;
         charts::bar_chart(&mut cols[1], o, h, 5.0);
     });
-    let adherence: Vec<[f64; 2]> = w
-        .iter()
-        .filter(|(_, x)| x.planned > 0)
-        .map(|(d, x)| [charts::date_to_x(*d), x.done as f64 / x.planned as f64 * 100.0])
-        .collect();
-    if !adherence.is_empty() {
-        let mut o = ChartOpts::new("vol-adh", Axis::Date, Axis::Percent);
-        o.title = Some(tr!("Treinos do plano feitos (%)", "Plan sessions done (%)"));
+    if w.values().any(|x| x.plan > 0) {
+        let bars = w
+            .iter()
+            .map(|(d, x)| {
+                (
+                    charts::date_to_x(*d),
+                    x.plan as f64,
+                    widgets::GOOD,
+                    trf!(
+                        "{} · {} treino(s) do plano de {} corrida(s)",
+                        "{} · {} plan session(s) of {} run(s)",
+                        format::date_short(*d),
+                        x.plan,
+                        x.runs
+                    ),
+                )
+            })
+            .collect();
+        let mut o = ChartOpts::new("vol-plan", Axis::Date, Axis::Plain);
+        o.title = Some(tr!("Treinos do plano por semana", "Plan sessions per week"));
         o.height = 160.0;
-        charts::line_chart(
-            ui,
-            o,
-            vec![
-                Series::line("%", widgets::GOOD, adherence.clone()),
-                Series::dots("%", widgets::GOOD, adherence),
-            ],
-        );
+        charts::bar_chart(ui, o, bars, 5.0);
     }
     let hr: Vec<[f64; 2]> = w
         .iter()

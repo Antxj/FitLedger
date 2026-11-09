@@ -1,11 +1,12 @@
 //! The running coach: from a goal (distance, optional finish time, optional
-//! heart-rate cap, days per week) and the runs imported so far, it builds a
-//! week-by-week schedule and rebuilds the future part of it every time a run
-//! is imported or the goal changes.
+//! heart-rate cap) and the runs imported so far, it proposes the next few
+//! sessions, with no fixed days: the runner trains when they can, every
+//! imported run fulfils the next session of the queue, and the queue is
+//! rebuilt every time a run is imported or the goal changes.
 //!
-//! - `fitness`: what the recent runs say (HR × speed model, volume, longest run...)
-//! - `adapt`: how the last weeks went (missed sessions, easy runs too hard...)
-//! - `plan`: projection of the goal date and generation of the sessions
+//! - `fitness`: what the recent runs say (HR × speed model, typical run, frequency...)
+//! - `adapt`: how the last runs went (easy runs too hard, long breaks, load spikes...)
+//! - `plan`: projection of the goal date and the queue of next sessions
 //! - `store`: persistence (goal versions, sessions, coach notes)
 //!
 //! Everything here is conservative and explained to the user. It is training
@@ -55,12 +56,6 @@ pub struct Goal {
     pub target_hr: Option<f64>,
     /// Pace for the heart-rate goal (s/km) when there is no finish time.
     pub hr_pace: Option<f64>,
-    /// Running days per week (2 to 6).
-    pub days_per_week: u8,
-    /// Chosen weekdays (Mon..Sun). Ignored unless exactly `days_per_week` are chosen.
-    pub preferred_days: [bool; 7],
-    /// Weekday of the long run (0 = Monday ... 6 = Sunday).
-    pub long_run_day: u8,
     /// Optional deadline; without it the coach estimates one.
     pub target_date: Option<NaiveDate>,
     pub surface: Surface,
@@ -76,9 +71,6 @@ impl Default for Goal {
             target_time_s: None,
             target_hr: None,
             hr_pace: None,
-            days_per_week: 3,
-            preferred_days: [false; 7],
-            long_run_day: 6,
             target_date: None,
             surface: Surface::Any,
             start_date: chrono::Local::now().date_naive(),
@@ -92,10 +84,6 @@ impl Goal {
         self.target_time_s
             .map(|t| t / (self.distance_m / 1000.0))
             .or(self.hr_pace)
-    }
-
-    pub fn days(&self) -> u8 {
-        self.days_per_week.clamp(2, 6)
     }
 
     /// "5 km · 28:00 · avg HR ≤ 160 bpm"
@@ -124,7 +112,7 @@ impl Goal {
 pub enum SessionKind {
     /// Conversational run, heart rate capped at the top of zone 2.
     Easy,
-    /// The week's longest run, easy effort.
+    /// The longest run of the cycle, easy effort.
     Long,
     /// Continuous run in zone 3.
     Tempo,
@@ -161,9 +149,11 @@ impl SessionKind {
 pub enum Phase {
     /// Aerobic base: only easy running.
     Base,
-    /// One quality session a week.
+    /// A quality session every few runs.
     Build,
-    /// Easier last week before the goal date.
+    /// A lighter stretch every third cycle of four sessions.
+    Light,
+    /// Easier session right before the goal attempt.
     Taper,
     /// Goal reached: keep fitness.
     Maintain,
@@ -174,6 +164,7 @@ impl Phase {
         match self {
             Phase::Base => tr!("Base aeróbica", "Aerobic base"),
             Phase::Build => tr!("Desenvolvimento", "Build"),
+            Phase::Light => tr!("Fase leve", "Light phase"),
             Phase::Taper => tr!("Polimento", "Taper"),
             Phase::Maintain => tr!("Manutenção", "Maintenance"),
         }
@@ -204,10 +195,11 @@ impl Step {
 
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct Session {
+    /// Planned sessions: the earliest suggested day. Done: the day of the run.
     pub date: NaiveDate,
     pub kind: SessionKind,
     pub phase: Phase,
-    /// Week number since the start of the goal (1-based).
+    /// Cycle of four sessions since the start of the goal (1-based).
     pub week: u32,
     pub duration_s: f64,
     /// Expected distance at the target pace (or the distance itself for check runs).
@@ -222,6 +214,11 @@ pub struct Session {
 }
 
 impl Session {
+    /// Run/walk session (easy pace too slow to run continuously under the HR cap).
+    pub fn run_walk(&self) -> bool {
+        matches!(self.kind, SessionKind::Easy | SessionKind::Long) && self.steps.len() == 2
+    }
+
     /// "~7:10–7:40/km · 8,4–7,8 km/h"
     pub fn pace_text(&self) -> Option<String> {
         let (fast, slow) = self.pace?;
@@ -235,7 +232,8 @@ impl Session {
     }
 }
 
-/// Result of a planned session once its day has passed.
+/// Result of a planned session. `Missed` only exists in data from the
+/// fixed-day plans of versions before 0.4.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
 pub enum Status {
@@ -301,13 +299,11 @@ mod tests {
         };
         assert_eq!(h.goal_pace(), Some(360.0));
         assert!(h.describe().contains("6:00/km"));
-        assert_eq!(
-            Goal {
-                days_per_week: 9,
-                ..Default::default()
-            }
-            .days(),
-            6
-        );
+        // goals saved by older versions (with fixed days) still load
+        let old: Goal = serde_json::from_str(
+            r#"{"id":0,"distance_m":5000.0,"days_per_week":3,"preferred_days":[false,false,false,false,false,false,false],"long_run_day":6,"start_date":"2026-10-19"}"#,
+        )
+        .unwrap();
+        assert_eq!(old.distance_m, 5000.0);
     }
 }

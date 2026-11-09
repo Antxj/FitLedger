@@ -1,5 +1,6 @@
-//! The goal: distance, optional finish time, optional heart-rate cap, days
-//! per week. Saving a change rebuilds the plan from today.
+//! The goal: distance, optional finish time, optional heart-rate cap,
+//! optional date. No fixed days: the runner trains when they can. Saving a
+//! change rebuilds the queue of sessions.
 
 use super::widgets::{self, weak};
 use super::{App, Page};
@@ -174,46 +175,6 @@ pub fn form(ui: &mut Ui, f: &mut Form, save_label: &str) -> Option<Goal> {
                 });
                 ui.end_row();
             }
-            ui.label(RichText::new(tr!("Dias por semana", "Days per week")).strong());
-            ui.horizontal(|ui| {
-                for n in 2..=6u8 {
-                    ui.selectable_value(&mut f.g.days_per_week, n, n.to_string());
-                }
-            });
-            ui.end_row();
-            ui.label(RichText::new(tr!("Quais dias (opcional)", "Which days (optional)")).strong());
-            ui.horizontal(|ui| {
-                let monday = crate::coach::week_start(chrono::Local::now().date_naive());
-                for d in 0..7 {
-                    let name = format::weekday_short(monday + chrono::Duration::days(d as i64));
-                    ui.toggle_value(&mut f.g.preferred_days[d], name);
-                }
-                let n = f.g.preferred_days.iter().filter(|x| **x).count();
-                if n > 0 && n != f.g.days_per_week as usize {
-                    ui.label(
-                        RichText::new(trf!(
-                            "marque {} dias (ou nenhum)",
-                            "pick {} days (or none)",
-                            f.g.days_per_week
-                        ))
-                        .small()
-                        .color(widgets::WARN),
-                    );
-                }
-            });
-            ui.end_row();
-            ui.label(RichText::new(tr!("Dia do longão", "Long run day")).strong());
-            ui.horizontal(|ui| {
-                let monday = crate::coach::week_start(chrono::Local::now().date_naive());
-                for d in 0..7u8 {
-                    ui.selectable_value(
-                        &mut f.g.long_run_day,
-                        d,
-                        format::weekday_short(monday + chrono::Duration::days(d as i64)),
-                    );
-                }
-            });
-            ui.end_row();
             ui.label(RichText::new(tr!("Onde vai correr", "Where you run")).strong());
             ui.horizontal(|ui| {
                 for s in [Surface::Any, Surface::Treadmill, Surface::Road] {
@@ -241,6 +202,13 @@ pub fn form(ui: &mut Ui, f: &mut Form, save_label: &str) -> Option<Goal> {
             });
             ui.end_row();
         });
+    ui.label(weak(
+        ui,
+        tr!(
+            "Sem dias fixos: corra quando puder. Cada corrida importada cumpre o próximo treino do plano, e o tamanho dos treinos acompanha o que você realmente corre.",
+            "No fixed days: run whenever you can. Each imported run fulfils the plan's next session, and sessions are sized from what you actually run."
+        ),
+    ));
     if let Some(e) = &f.error {
         ui.label(RichText::new(e).color(widgets::BAD));
     }
@@ -271,12 +239,7 @@ pub fn show(app: &mut App, ui: &mut Ui) {
                 ui.label(RichText::new(c.goal.describe()).size(20.0).strong());
                 ui.label(weak(
                     ui,
-                    trf!(
-                        "{} dias por semana · desde {}",
-                        "{} days a week · since {}",
-                        c.goal.days(),
-                        format::date(c.goal.start_date)
-                    ),
+                    trf!("desde {}", "since {}", format::date(c.goal.start_date)),
                 ));
             });
             ui.add_space(8.0);
@@ -309,16 +272,20 @@ pub fn show(app: &mut App, ui: &mut Ui) {
             }
             return;
         }
-        let history = app.db.goal_history().unwrap_or_default();
+        let mut history = app.db.goal_history().unwrap_or_default();
+        // versions that only changed settings no longer shown (days, date...) look identical
+        history.dedup_by(|older, newer| older.2.describe() == newer.2.describe() && older.3.is_none());
+        let active = app.coach.as_ref().map(|c| c.goal.id);
         if history.len() > 1 || history.iter().any(|h| h.3.is_some()) {
             widgets::section(ui, tr!("Histórico de metas", "Goal history"));
             egui::Grid::new("goal-history").striped(true).num_columns(3).show(ui, |ui| {
-                for (_, at, g, achieved) in &history {
+                for (id, at, g, achieved) in &history {
                     let created = chrono::DateTime::from_timestamp(*at, 0).map(|d| d.date_naive()).unwrap_or_default();
                     ui.label(format::date(created));
                     ui.label(g.describe());
                     match achieved {
                         Some(d) => widgets::chip(ui, &trf!("✔ atingida em {}", "✔ reached on {}", d), widgets::GOOD),
+                        None if Some(*id) == active => widgets::chip(ui, tr!("atual", "current"), widgets::ACCENT),
                         None => {
                             ui.label("");
                         }

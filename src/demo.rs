@@ -1,7 +1,7 @@
 //! Fake data for documentation screenshots and manual testing:
 //! `FITLEDGER_DEMO=1` fills an empty database with a made-up beginner who
-//! sets a goal 8 weeks ago and follows the coach's plan day by day (missing
-//! a few sessions). The GPS track is an invented loop: no real place or
+//! sets a goal 8 weeks ago and follows the coach's queue, running on some
+//! of the days a session is advised (no fixed days). The GPS track is an invented loop: no real place or
 //! person is involved.
 
 use crate::coach::store::refresh;
@@ -79,7 +79,8 @@ fn run_for(s: &Session, fitness: f64, serial: u32, rng: &mut Rng) -> Synthetic {
         let mut v = Vec::new();
         for st in &s.steps {
             for _ in 0..st.repeat {
-                v.push((st.duration_s, st.pace.map(kmh).unwrap_or(8.0)));
+                let walk = st.label_en.contains("walk");
+                v.push((st.duration_s, st.pace.map(kmh).unwrap_or(if walk { 5.5 } else { 8.0 })));
             }
         }
         v
@@ -129,8 +130,6 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
         distance_m: 5000.0,
         target_hr: Some(160.0),
         hr_pace: Some(390.0),
-        days_per_week: 3,
-        long_run_day: 6,
         surface: Surface::Any,
         start_date: start,
         ..Default::default()
@@ -141,13 +140,15 @@ pub fn fill(db: &mut Db) -> rusqlite::Result<()> {
     while d < today {
         let fitness = (d - start).num_days() as f64 / 70.0;
         if let Some(state) = refresh(db, d, d == start)? {
-            for t in state.today(d) {
-                // misses about 1 session in 10
-                if rng.next() < 0.1 {
-                    continue;
-                }
+            // no fixed days: runs on about half of the days the next session is advised
+            if let Some(t) = state
+                .next_session()
+                .filter(|t| t.session.date <= d && rng.next() < 0.55)
+            {
+                let mut session = t.session.clone();
+                session.date = d;
                 serial += 1;
-                let fit = run_for(&t.session, fitness, serial, &mut rng);
+                let fit = run_for(&session, fitness, serial, &mut rng);
                 if let Ok(crate::import::Outcome::Imported(id)) =
                     crate::import::import_bytes(db, "run.fit", &fit.encode())
                     && let Ok(Some(mut a)) = db.activity(id)

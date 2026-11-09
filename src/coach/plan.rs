@@ -1,25 +1,31 @@
-//! Goal projection and schedule generation.
+//! Goal projection and the queue of next sessions.
 //!
-//! The schedule is a pure function of (goal, fitness, adjustments, today):
-//! calling it again after a new run or a goal change rebuilds the future
-//! consistently. Rules are deliberately conservative for a new runner:
-//! running time grows at most 8% a week, every 4th week is lighter, the long
-//! run grows about 10% a week up to the goal distance, and harder sessions
-//! only start after a few weeks of easy running.
+//! There are no fixed days: the runner trains when they can and every run
+//! fulfils the next session of the queue. The queue is a pure function of
+//! (goal, fitness, adjustments, what was done, today), so calling it again
+//! after a new run or a goal change rebuilds it consistently. Rules are
+//! conservative for a new runner: sessions are sized from the runs actually
+//! done (easy +5%, long run +10% at a time), every third cycle of four
+//! sessions is lighter, a long break or a load spike makes the next session
+//! smaller, and harder sessions only start after a few easy ones.
 
-use super::adapt::Adjust;
+use super::adapt::{Adjust, GROWTH, GROWTH_CAREFUL};
 use super::fitness::{Fitness, day};
-use super::{Goal, Phase, Session, SessionKind, Step, Surface, week_start};
+use super::{Goal, Phase, Session, SessionKind, Step, Surface};
 use crate::format;
 use crate::model::Activity;
 use chrono::{Duration, NaiveDate};
 use std::collections::HashMap;
 
-/// Longest plan the coach builds ahead.
-pub const MAX_WEEKS: u32 = 26;
-/// Expected improvement of race time per week for a new runner.
+/// Sessions shown ahead.
+pub const QUEUE: usize = 3;
+/// Days between progress checks.
+const CHECK_EVERY_DAYS: i64 = 18;
+/// Easy pace (s/km) from which easy runs become run/walk.
+pub const RUN_WALK_PACE: f64 = 540.0;
+/// Expected improvement of race time per week for a new runner (3 runs a week).
 const TIME_GAIN_PER_WEEK: f64 = 0.008;
-/// Expected drop of heart rate at a fixed pace per week when the data has no trend yet.
+/// Expected drop of heart rate at a fixed pace per week when the data has no trend yet (3 runs a week).
 const HR_GAIN_PER_WEEK: f64 = 0.4;
 
 #[derive(Debug, Clone, PartialEq)]
@@ -93,11 +99,24 @@ fn weeks_to_distance(from_m: f64, to_m: f64) -> f64 {
     w
 }
 
+/// Projection at the runner's current frequency.
 pub fn project(goal: &Goal, f: &Fitness, today: NaiveDate) -> Projection {
+    project_at(goal, f, today, f.runs_per_week)
+}
+
+/// Projection if the runner ran `per_week` times a week. Improvement is
+/// assumed to grow with the square root of the frequency (diminishing
+/// returns) and long runs to be about 30% of the runs.
+pub fn project_at(goal: &Goal, f: &Fitness, today: NaiveDate, per_week: f64) -> Projection {
+    let per_week = if per_week > 0.0 { per_week } else { 2.0 };
+    let current = if f.runs_per_week > 0.0 { f.runs_per_week } else { 2.0 };
+    // relative to 3 runs a week (the default rates) and to now (the measured trend)
+    let vs_default = (per_week / 3.0).clamp(0.25, 1.0).sqrt();
+    let vs_now = (per_week / current).clamp(0.25, 4.0).sqrt();
     let mut parts = Vec::new();
     let km = goal.distance_m / 1000.0;
     // distance: what the longest recent run says
-    let dist_weeks = weeks_to_distance(f.longest_m, goal.distance_m);
+    let dist_weeks = weeks_to_distance(f.longest_m, goal.distance_m) / (per_week * 0.3).clamp(0.25, 1.0);
     parts.push(Part {
         label: tr!("Distância", "Distance").into(),
         now: format::km(f.longest_m),
@@ -108,10 +127,11 @@ pub fn project(goal: &Goal, f: &Fitness, today: NaiveDate) -> Projection {
     });
     if let Some(t) = goal.target_time_s {
         let pred = f.predicted_time.unwrap_or(f.easy_pace * 0.9 * km);
+        let gain = TIME_GAIN_PER_WEEK * vs_default;
         let weeks = if pred <= t {
             0.0
         } else {
-            (pred / t).ln() / (1.0 / (1.0 - TIME_GAIN_PER_WEEK)).ln()
+            (pred / t).ln() / (1.0 / (1.0 - gain)).ln()
         };
         parts.push(Part {
             label: tr!("Tempo previsto", "Predicted time").into(),
@@ -126,8 +146,8 @@ pub fn project(goal: &Goal, f: &Fitness, today: NaiveDate) -> Projection {
         let now = f.hr_at_goal_pace;
         let rate = f
             .hr_trend_per_week
-            .map(|t| (-t).max(HR_GAIN_PER_WEEK))
-            .unwrap_or(HR_GAIN_PER_WEEK);
+            .map(|t| (-t * vs_now).max(HR_GAIN_PER_WEEK * vs_default))
+            .unwrap_or(HR_GAIN_PER_WEEK * vs_default);
         let weeks = match now {
             Some(n) if n > h => (n - h) / rate,
             Some(_) => 0.0,
@@ -160,27 +180,6 @@ pub fn project(goal: &Goal, f: &Fitness, today: NaiveDate) -> Projection {
         parts,
         weeks_available,
     }
-}
-
-/// Running days of the week (0 = Monday), with the long run day included.
-pub fn running_days(goal: &Goal) -> Vec<u8> {
-    let n = goal.days() as usize;
-    let chosen: Vec<u8> = (0..7u8).filter(|d| goal.preferred_days[*d as usize]).collect();
-    if chosen.len() == n {
-        return chosen;
-    }
-    // patterns for a Sunday long run, then rotated to the chosen long day
-    let base: &[u8] = match n {
-        2 => &[2, 6],
-        3 => &[1, 3, 6],
-        4 => &[1, 2, 4, 6],
-        5 => &[0, 1, 3, 4, 6],
-        _ => &[0, 1, 2, 3, 4, 6],
-    };
-    let shift = (goal.long_run_day.min(6) as i32 - 6).rem_euclid(7);
-    let mut days: Vec<u8> = base.iter().map(|d| ((*d as i32 + shift).rem_euclid(7)) as u8).collect();
-    days.sort();
-    days
 }
 
 fn easy_pace_range(f: &Fitness) -> (f64, f64) {
@@ -362,10 +361,61 @@ fn make(
             s.hr_max = goal.target_hr;
         }
     }
+    if matches!(kind, SessionKind::Easy | SessionKind::Long) && f.easy_pace >= RUN_WALK_PACE {
+        run_walk(&mut s, f);
+    }
     s
 }
 
-/// Builds the sessions from `today` until the goal date (or the projected one).
+/// Easy pace so slow that running continuously under the HR cap is hard:
+/// jog/walk repeats (Galloway's run-walk). The walk breaks shrink as the
+/// easy pace gets faster.
+fn run_walk(s: &mut Session, f: &Fitness) {
+    let jog = if f.easy_pace >= 630.0 {
+        2.0
+    } else if f.easy_pace >= 585.0 {
+        3.0
+    } else {
+        5.0
+    };
+    let reps = (s.duration_s / 60.0 / (jog + 1.0)).round().max(3.0) as u32;
+    s.steps = vec![
+        step(reps, "Trote leve", "Easy jog", jog * 60.0, None, Some(f.easy_hr_cap)),
+        step(reps, "Caminhada rápida", "Brisk walk", 60.0, None, None),
+    ];
+    s.duration_s = reps as f64 * (jog + 1.0) * 60.0;
+    if let Some(p) = s.pace {
+        s.distance_m = dist_for(s.duration_s, p);
+    }
+}
+
+/// What the queue needs to know about the plan sessions done so far.
+#[derive(Debug, Clone, Default, PartialEq)]
+pub struct Context {
+    /// Plan sessions done since the goal started.
+    pub done: usize,
+    /// Day of the last run and whether it was demanding (long, quality or mostly above zone 2).
+    pub last_run: Option<(NaiveDate, bool)>,
+    /// Last progress check done.
+    pub last_check: Option<NaiveDate>,
+    /// Plan sessions done since the last goal attempt (None = never attempted).
+    pub since_attempt: Option<usize>,
+    /// The last plan session done was the easy run before the goal attempt.
+    pub tapered: bool,
+}
+
+/// Easy sessions before any quality session (newer runners get more).
+fn base_runs(goal: &Goal, f: &Fitness) -> usize {
+    if f.runs_28d < 6 || f.longest_m < goal.distance_m * 0.5 {
+        4
+    } else {
+        2
+    }
+}
+
+/// The next `QUEUE` sessions. The first one is dated with the earliest day
+/// it is advised (a rest day after a demanding run); the others are only
+/// ordered.
 pub fn generate(
     goal: &Goal,
     f: &Fitness,
@@ -373,181 +423,119 @@ pub fn generate(
     zones_top3: f64,
     today: NaiveDate,
     reached: bool,
+    ctx: &Context,
 ) -> (Vec<Session>, Projection) {
     let proj = project(goal, f, today);
-    let horizon_weeks = if reached {
-        4
+    // sizes come from what the runner actually does
+    let long_target = (goal.distance_m / 1000.0 * 1.05 * f.easy_pace / 60.0).max(30.0);
+    let typical = if f.typical_s > 0.0 { f.typical_s / 60.0 } else { 20.0 };
+    let longest = (f.longest_s / 60.0).max(typical);
+    let comeback = f.last_run.is_some_and(|d| (today - d).num_days() > 14);
+    let (easy_f, long_f): (f64, f64) = if comeback {
+        (0.8, 0.85)
+    } else if adj.growth >= GROWTH {
+        (1.05, 1.10)
+    } else if adj.growth >= GROWTH_CAREFUL {
+        (1.0, 1.05)
     } else {
-        match goal.target_date {
-            Some(d) if d > today => (((d - week_start(today)).num_days() / 7) + 1) as u32,
-            _ => proj.weeks + 1,
-        }
+        (0.95, 1.0)
+    };
+    let long_f = if adj.hold_long { long_f.min(1.0) } else { long_f };
+    let easy = (typical * easy_f).clamp(15.0, 60.0).min(long_target);
+    let long = (longest * long_f).min(long_target).max((easy + 5.0).min(long_target));
+    let quality_kind = if goal.target_time_s.is_some() {
+        SessionKind::Intervals
+    } else {
+        SessionKind::Tempo
+    };
+    let base = base_runs(goal, f);
+    let ready = !reached
+        && (proj.parts.iter().all(|p| p.weeks <= 1.0)
+            || goal
+                .target_date
+                .is_some_and(|d| d > today && (d - today).num_days() <= 10))
+        && ctx.since_attempt.is_none_or(|n| n >= 4);
+    // a rest day after a demanding run (and between runs while still new to it)
+    let mut first = today;
+    if let Some((d, hard)) = ctx.last_run {
+        let gap = if hard || f.runs_28d < 6 { 2 } else { 1 };
+        first = first.max(d + Duration::days(gap));
     }
-    .clamp(2, MAX_WEEKS);
-    let end_date = match (reached, goal.target_date) {
-        (false, Some(d)) if d > today => d,
-        _ => week_start(today) + Duration::days(horizon_weeks as i64 * 7 - 1),
-    };
-    let days = running_days(goal);
-    let n = days.len();
-    let easy_min_pace = f.easy_pace / 60.0; // minutes per km
-    let long_target_min = (goal.distance_m / 1000.0 * 1.05 * easy_min_pace).max(30.0);
-    let peak = long_target_min + (n as f64 - 1.0) * 35.0;
-    // start from what was actually run: the last full week or the 3-week
-    // average, whichever is higher (a lighter week does not reset progress)
-    let mut weekly = f.weekly_minutes.max(f.last_week_minutes).max(n as f64 * 20.0).min(peak);
-    let mut long = (f.longest_s / 60.0).max(20.0).min(long_target_min);
-    let week_offset = ((week_start(today) - week_start(goal.start_date)).num_days() / 7).max(0) as u32;
-    // a few weeks of easy running before any quality session
-    let base_weeks: u32 = if f.runs_28d < 6 || f.longest_m < goal.distance_m * 0.5 {
-        3
-    } else {
-        1
-    };
     let mut out = Vec::new();
-    let mut growth_weeks = 0u32;
-    let total_weeks = ((end_date - week_start(today)).num_days() / 7 + 1) as u32;
-    for wk in 0..total_weeks {
-        let ws = week_start(today) + Duration::days(wk as i64 * 7);
-        let week_no = week_offset + wk + 1;
-        let last_week = ws + Duration::days(6) >= end_date;
-        let phase = if reached {
+    let mut check_queued = false;
+    for i in 0..QUEUE {
+        let k = ctx.done + i;
+        let date = first + Duration::days(2 * i as i64);
+        let cycle = (k / 4) as u32 + 1;
+        let light = !reached && k >= base && cycle.is_multiple_of(3);
+        let mut phase = if reached {
             Phase::Maintain
-        } else if last_week && total_weeks >= 3 {
-            Phase::Taper
-        } else if week_no <= base_weeks {
+        } else if k < base {
             Phase::Base
+        } else if light {
+            Phase::Light
         } else {
             Phase::Build
         };
-        let deload = week_no.is_multiple_of(4) || (wk == 0 && adj.deload_now);
-        // the current week is already the next step after the runs done so far
-        if !deload {
-            weekly = (weekly * adj.growth).min(peak);
-            if !(adj.hold_long && wk == 0) {
-                long = (long * 1.10).min(long_target_min);
-            }
-            growth_weeks += 1;
+        let mut factor = if light { 0.8 } else { 1.0 };
+        if i == 0 && adj.deload_now {
+            factor *= 0.8;
         }
-        let factor = match (deload, phase) {
-            (_, Phase::Taper) => 0.7,
-            (true, _) => 0.8,
-            _ => 1.0,
-        };
-        let w_min = weekly * factor;
-        let l_min = (long * if deload { 0.85 } else { 1.0 }).min(w_min * 0.5).max(20.0);
-        let check_week = goal.goal_pace().is_some() && week_no.is_multiple_of(3) && phase != Phase::Taper;
-        let quality = matches!(phase, Phase::Build | Phase::Maintain) && n >= 3 && !deload;
-        let quality_kind = if goal.target_time_s.is_some() {
-            SessionKind::Intervals
-        } else {
-            SessionKind::Tempo
-        };
-        let reps = (4 + growth_weeks / 3).min(6);
-        // roles: long on the long-run day; quality/check on the day farthest from it
-        let long_day = if days.contains(&goal.long_run_day) {
-            goal.long_run_day
-        } else {
-            *days.last().unwrap()
-        };
-        let special_day = days.iter().copied().filter(|d| *d != long_day).max_by_key(|d| {
-            let gap = (*d as i32 - long_day as i32).rem_euclid(7);
-            gap.min(7 - gap)
-        });
-        // the special session (check or quality) only fits when the week has
-        // room for it plus at least 20 minutes for each easy run
-        let wanted = if check_week {
-            Some(SessionKind::Check)
-        } else if quality {
-            Some(quality_kind)
-        } else {
-            None
-        }
-        .filter(|_| special_day.is_some());
-        let n_easy_with = n.saturating_sub(2);
-        let budget = w_min - l_min - 20.0 * n_easy_with as f64;
-        let max_reps = ((budget - 20.0) / 5.0).floor().max(0.0) as u32;
-        let special = match wanted {
-            Some(SessionKind::Intervals) if max_reps >= 3 => {
-                Some((SessionKind::Intervals, budget.min(50.0), reps.min(max_reps)))
+        let check_due = goal.goal_pace().is_some()
+            && !check_queued
+            && k >= base
+            && ctx.last_check.is_none_or(|d| (date - d).num_days() >= CHECK_EVERY_DAYS);
+        let kind = if ready {
+            // an easy run, then the goal itself
+            phase = Phase::Taper;
+            match (ctx.tapered, i) {
+                (true, 0) | (false, 1) => SessionKind::GoalAttempt,
+                (false, 0) => {
+                    factor *= 0.7;
+                    SessionKind::Easy
+                }
+                _ => {
+                    phase = Phase::Maintain;
+                    SessionKind::Easy
+                }
             }
-            Some(SessionKind::Tempo) if budget >= 32.0 => Some((SessionKind::Tempo, budget.min(45.0), reps)),
-            // the check is what measures progress: it may replace an easy run whole
-            Some(SessionKind::Check) if budget >= 12.0 => {
-                Some((SessionKind::Check, (budget - 8.0).clamp(10.0, 40.0), reps))
-            }
-            _ => None,
-        };
-        let mut week_sessions: Vec<Session> = Vec::new();
-        for &d in &days {
-            let date = ws + Duration::days(d as i64);
-            if date < today || date > end_date {
-                continue;
-            }
-            let s = if phase == Phase::Taper && d == long_day {
-                make(
-                    SessionKind::GoalAttempt,
-                    date,
-                    week_no,
-                    phase,
-                    0.0,
-                    goal,
-                    f,
-                    zones_top3,
-                    reps,
-                )
-            } else if d == long_day {
-                make(
-                    SessionKind::Long,
-                    date,
-                    week_no,
-                    phase,
-                    l_min.round(),
-                    goal,
-                    f,
-                    zones_top3,
-                    reps,
-                )
-            } else if let (true, Some((k, m, r))) = (Some(d) == special_day, special) {
-                make(k, date, week_no, phase, m.round(), goal, f, zones_top3, r)
+        } else if k < base {
+            if k % 2 == 1 {
+                SessionKind::Long
             } else {
-                make(SessionKind::Easy, date, week_no, phase, 0.0, goal, f, zones_top3, reps)
-            };
-            week_sessions.push(s);
-        }
-        // easy runs share what is left of the week's time (planned for the whole
-        // week, so a week that starts today is not crammed)
-        let n_easy_total = days.len() - 1 - usize::from(special.is_some());
-        let fixed: f64 = days
-            .iter()
-            .filter(|d| **d == long_day || (special.is_some() && Some(**d) == special_day))
-            .map(|d| {
-                week_sessions
-                    .iter()
-                    .find(|s| s.date == ws + Duration::days(*d as i64))
-                    .map(|s| s.duration_s / 60.0)
-                    .unwrap_or(if *d == long_day {
-                        l_min
-                    } else {
-                        special.map(|x| x.1).unwrap_or(0.0)
-                    })
-            })
-            .sum();
-        let easy_min = ((w_min - fixed) / n_easy_total.max(1) as f64).clamp(15.0, 60.0).round();
-        for s in week_sessions.iter_mut().filter(|s| s.kind == SessionKind::Easy) {
-            *s = make(
-                SessionKind::Easy,
-                s.date,
-                week_no,
-                phase,
-                easy_min,
-                goal,
-                f,
-                zones_top3,
-                reps,
-            );
-        }
-        out.extend(week_sessions);
+                SessionKind::Easy
+            }
+        } else {
+            match k % 4 {
+                1 => SessionKind::Long,
+                3 if check_due => SessionKind::Check,
+                // one harder session every four, only with enough running
+                3 if f.runs_per_week >= 1.5 && !light => quality_kind,
+                _ => SessionKind::Easy,
+            }
+        };
+        check_queued |= kind == SessionKind::Check;
+        let minutes = match kind {
+            SessionKind::Easy => easy * factor,
+            SessionKind::Long => long * factor,
+            SessionKind::Tempo => (typical * 1.05).clamp(32.0, 45.0),
+            SessionKind::Intervals => (typical * 1.3).max(35.0),
+            SessionKind::Check => (typical - 8.0).clamp(10.0, 30.0),
+            SessionKind::GoalAttempt => 0.0,
+        };
+        // intervals: as many 5-minute repeats as fit (3 to 6)
+        let reps = (((minutes - 20.0) / 5.0).floor().max(3.0) as u32).min((4 + ctx.done as u32 / 12).min(6));
+        out.push(make(
+            kind,
+            date,
+            cycle,
+            phase,
+            minutes.max(10.0).round(),
+            goal,
+            f,
+            zones_top3,
+            reps,
+        ));
     }
     (out, proj)
 }
@@ -556,7 +544,6 @@ pub fn generate(
 mod tests {
     use super::*;
     use crate::coach::fitness::HrModel;
-    use chrono::Datelike;
 
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
@@ -567,7 +554,10 @@ mod tests {
             runs_28d: 4,
             weekly_minutes: 60.0,
             weekly_km: 8.0,
-            last_week_minutes: 60.0,
+            minutes_7d: 60.0,
+            typical_s: 1200.0,
+            runs_per_week: 3.0,
+            last_run: None,
             longest_m: 3000.0,
             longest_s: 1500.0,
             model: Some(HrModel {
@@ -584,105 +574,177 @@ mod tests {
         }
     }
 
-    fn weekly_minutes(s: &[Session]) -> Vec<f64> {
-        let mut m: std::collections::BTreeMap<u32, f64> = Default::default();
-        for x in s {
-            *m.entry(x.week).or_default() += x.duration_s / 60.0;
+    fn ctx(done: usize) -> Context {
+        Context {
+            done,
+            ..Default::default()
         }
-        m.into_values().collect()
+    }
+
+    /// Runs ~36 min about once a week, with a high HR.
+    fn weekly_runner(today: NaiveDate) -> Fitness {
+        Fitness {
+            runs_28d: 2,
+            runs_per_week: 1.0,
+            typical_s: 36.0 * 60.0,
+            longest_m: 5000.0,
+            longest_s: 36.0 * 60.0,
+            easy_pace: 587.0,
+            easy_hr_cap: 154.0,
+            last_run: Some(today),
+            ..beginner()
+        }
     }
 
     #[test]
-    fn days_patterns() {
-        let g = Goal {
-            days_per_week: 3,
-            long_run_day: 6,
-            ..Default::default()
-        };
-        assert_eq!(running_days(&g), vec![1, 3, 6]);
-        let g = Goal {
-            days_per_week: 3,
-            long_run_day: 5,
-            ..Default::default()
-        };
-        assert_eq!(running_days(&g), vec![0, 2, 5]);
-        let mut chosen = [false; 7];
-        chosen[0] = true;
-        chosen[3] = true;
-        let g = Goal {
-            days_per_week: 2,
-            preferred_days: chosen,
-            ..Default::default()
-        };
-        assert_eq!(running_days(&g), vec![0, 3]);
-    }
-
-    #[test]
-    fn plan_respects_days_growth_and_ends_with_the_goal() {
-        let today = d("2026-10-19"); // Monday
+    fn queue_is_sized_from_the_runs_actually_done() {
+        let today = d("2026-11-09");
         let goal = Goal {
             distance_m: 5000.0,
             target_time_s: Some(1800.0),
-            days_per_week: 3,
-            start_date: today,
+            target_hr: Some(165.0),
+            start_date: d("2026-10-19"),
             ..Default::default()
         };
-        let (s, proj) = generate(&goal, &beginner(), &Adjust::default(), 165.0, today, false);
-        assert!(proj.weeks >= 2);
-        // three runs a week on Tue, Thu, Sun
-        for x in &s {
-            assert!([1, 3, 6].contains(&x.date.weekday().num_days_from_monday()), "{x:?}");
-        }
-        // weekly time never grows more than 10% over the busiest week so far
-        // (coming back from a lighter week is not growth)
-        let w = weekly_minutes(&s);
-        for k in 1..w.len() {
-            let before = w[..k].iter().cloned().fold(0.0, f64::max);
-            assert!(w[k] <= before * 1.10 + 3.0, "week {k}: {w:?}");
-        }
-        // no quality session in the base weeks, intervals later, goal attempt last
+        let f = weekly_runner(today);
+        let c = Context {
+            done: 1,
+            last_run: Some((today, true)),
+            ..Default::default()
+        };
+        let (q, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, false, &c);
+        assert_eq!(q.len(), QUEUE);
+        // a long run today: rest tomorrow, next session the day after
+        assert_eq!(q[0].date, d("2026-11-11"));
+        // the 36-minute habit is respected (no 15-minute runs)
+        let e = q.iter().find(|s| s.kind == SessionKind::Easy).unwrap();
         assert!(
-            s.iter()
-                .filter(|x| x.week <= 3)
-                .all(|x| !matches!(x.kind, SessionKind::Intervals | SessionKind::Tempo))
+            e.duration_s >= 34.0 * 60.0 && e.duration_s <= 42.0 * 60.0,
+            "{}",
+            e.duration_s
         );
-        assert!(s.iter().any(|x| x.kind == SessionKind::Intervals));
-        assert!(s.iter().any(|x| x.kind == SessionKind::Check));
-        assert_eq!(s.last().unwrap().kind, SessionKind::GoalAttempt);
-        assert!((s.last().unwrap().distance_m - 5000.0).abs() < 2000.0);
-        // easy sessions carry an HR cap and a treadmill-friendly pace range
-        let e = s.iter().find(|x| x.kind == SessionKind::Easy).unwrap();
-        assert_eq!(e.hr_max, Some(145.0));
-        assert!(e.pace_text().unwrap().contains("km/h"));
-        // the long run never passes the goal distance by much
-        assert!(
-            s.iter()
-                .filter(|x| x.kind == SessionKind::Long)
-                .all(|x| x.distance_m <= 5000.0 * 1.15)
-        );
+        // easy pace 9:47/km: run/walk, 3 min jog + 1 min walk, HR cap on the jog
+        assert!(e.run_walk());
+        assert_eq!(e.steps[0].duration_s, 180.0);
+        assert_eq!(e.steps[0].hr_max, Some(154.0));
+        // once a week: no intervals
+        assert!(q.iter().all(|s| s.kind != SessionKind::Intervals));
+        // the long run is longer than the easy run and capped near the goal distance
+        let (q2, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, false, &ctx(5));
+        let l = q2.iter().find(|s| s.kind == SessionKind::Long).unwrap();
+        assert!(l.duration_s > e.duration_s);
+        assert!(l.distance_m <= 5000.0 * 1.15, "{}", l.distance_m);
     }
 
     #[test]
-    fn target_date_bounds_the_plan_and_adjustments_matter() {
+    fn cycle_quality_checks_and_rest() {
         let today = d("2026-10-19");
         let goal = Goal {
-            target_date: Some(d("2026-11-29")),
+            distance_m: 5000.0,
+            target_time_s: Some(1800.0),
             start_date: today,
             ..Default::default()
         };
-        let (s, _) = generate(&goal, &beginner(), &Adjust::default(), 165.0, today, false);
-        assert!(s.iter().all(|x| x.date <= d("2026-11-29")));
-        let held = Adjust {
-            growth: 1.0,
+        let mut f = beginner();
+        f.runs_28d = 10;
+        f.runs_per_week = 3.0;
+        f.typical_s = 1800.0;
+        // first sessions: easy and long only
+        let (q, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, false, &ctx(0));
+        assert!(
+            q.iter()
+                .all(|s| matches!(s.kind, SessionKind::Easy | SessionKind::Long))
+        );
+        assert_eq!(q[0].phase, Phase::Base);
+        // later, with a check done recently: intervals in the 4th slot
+        let c = Context {
+            done: 5,
+            last_check: Some(today - Duration::days(3)),
+            last_run: Some((today - Duration::days(1), false)),
             ..Default::default()
         };
-        let (s2, _) = generate(&goal, &beginner(), &held, 165.0, today, false);
-        let a: f64 = s.iter().map(|x| x.duration_s).sum();
-        let b: f64 = s2.iter().map(|x| x.duration_s).sum();
-        assert!(b < a, "{b} < {a}");
+        let (q, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, false, &c);
+        assert_eq!(
+            q.iter().map(|s| s.kind).collect::<Vec<_>>(),
+            vec![SessionKind::Long, SessionKind::Easy, SessionKind::Intervals]
+        );
+        assert_eq!(q[0].date, today); // easy yesterday: no rest needed
+        // the check comes back after 18 days
+        let c = Context {
+            last_check: Some(today - Duration::days(30)),
+            ..c
+        };
+        let (q, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, false, &c);
+        assert_eq!(q[2].kind, SessionKind::Check);
+        // every third cycle is lighter
+        let (q, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, false, &ctx(8));
+        assert!(q.iter().all(|s| s.phase == Phase::Light));
+    }
+
+    #[test]
+    fn comeback_and_adjustments_shrink_the_next_session() {
+        let today = d("2026-11-09");
+        let goal = Goal {
+            distance_m: 8000.0,
+            ..Default::default()
+        };
+        let mut f = weekly_runner(today);
+        f.easy_pace = 450.0; // continuous running
+        let (normal, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, false, &ctx(0));
+        assert!(!normal[0].run_walk());
+        f.last_run = Some(today - Duration::days(20));
+        let (back, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, false, &ctx(0));
+        assert!(back[0].duration_s < normal[0].duration_s * 0.85);
+        f.last_run = Some(today);
+        let tired = Adjust {
+            deload_now: true,
+            ..Default::default()
+        };
+        let (t, _) = generate(&goal, &f, &tired, 165.0, today, false, &ctx(0));
+        assert!(t[0].duration_s < normal[0].duration_s);
+    }
+
+    #[test]
+    fn ready_means_an_easy_run_then_the_goal() {
+        let today = d("2026-11-09");
+        let goal = Goal {
+            distance_m: 5000.0,
+            target_time_s: Some(2400.0),
+            ..Default::default()
+        };
+        let mut f = beginner();
+        f.longest_m = 5000.0;
+        f.predicted_time = Some(2300.0);
+        let (q, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, false, &ctx(10));
+        assert_eq!(q[0].kind, SessionKind::Easy);
+        assert_eq!(q[0].phase, Phase::Taper);
+        assert_eq!(q[1].kind, SessionKind::GoalAttempt);
+        let c = Context {
+            done: 11,
+            tapered: true,
+            ..Default::default()
+        };
+        let (q, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, false, &c);
+        assert_eq!(q[0].kind, SessionKind::GoalAttempt);
         // reached: maintenance only
-        let (m, _) = generate(&goal, &beginner(), &Adjust::default(), 165.0, today, true);
+        let (m, _) = generate(&goal, &f, &Adjust::default(), 165.0, today, true, &ctx(12));
         assert!(m.iter().all(|x| x.phase == Phase::Maintain));
+    }
+
+    #[test]
+    fn more_runs_a_week_bring_the_goal_closer() {
+        let today = d("2026-11-09");
+        let goal = Goal {
+            distance_m: 5000.0,
+            target_hr: Some(165.0),
+            hr_pace: Some(360.0),
+            ..Default::default()
+        };
+        let mut f = beginner();
+        f.runs_per_week = 1.0;
+        let now = project(&goal, &f, today);
+        let twice = project_at(&goal, &f, today, 2.0);
+        assert!(twice.weeks < now.weeks, "{} < {}", twice.weeks, now.weeks);
     }
 
     #[test]

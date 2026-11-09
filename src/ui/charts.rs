@@ -48,6 +48,20 @@ impl Axis {
         }
     }
 
+    /// Smallest y range shown, so an almost constant series (a treadmill at a
+    /// fixed speed) is drawn flat instead of magnifying hundredths into steps.
+    fn min_span(self) -> Option<f64> {
+        match self {
+            Axis::Pace => Some(60.0),
+            Axis::SpeedKmh => Some(2.0),
+            Axis::Bpm => Some(20.0),
+            Axis::Cadence => Some(10.0),
+            Axis::Meters => Some(10.0),
+            Axis::Watts => Some(40.0),
+            _ => None,
+        }
+    }
+
     fn tick(self, v: f64) -> String {
         match self {
             Axis::Distance => format::num_trim(v / 1000.0, 1),
@@ -245,6 +259,9 @@ pub fn line_chart(ui: &mut Ui, opts: ChartOpts<'_>, series: Vec<Series>) {
     if opts.legend {
         plot = plot.legend(Legend::default());
     }
+    if let Some((lo, hi)) = y_range_with_min_span(&series, ya) {
+        plot = plot.include_y(lo).include_y(hi);
+    }
     let hlines = opts.hlines;
     plot.show(ui, |p| {
         for s in series {
@@ -268,6 +285,21 @@ pub fn line_chart(ui: &mut Ui, opts: ChartOpts<'_>, series: Vec<Series>) {
             );
         }
     });
+}
+
+/// The data's y range widened around its middle to the axis' minimum span.
+fn y_range_with_min_span(series: &[Series], axis: Axis) -> Option<(f64, f64)> {
+    let span = axis.min_span()?;
+    let (lo, hi) = series
+        .iter()
+        .flat_map(|s| s.points.iter().map(|p| p[1]))
+        .filter(|v| v.is_finite())
+        .fold((f64::INFINITY, f64::NEG_INFINITY), |(lo, hi), v| (lo.min(v), hi.max(v)));
+    if !(lo.is_finite() && hi.is_finite()) || hi - lo >= span {
+        return None;
+    }
+    let mid = (lo + hi) / 2.0;
+    Some((mid - span / 2.0, mid + span / 2.0))
 }
 
 /// Bars: (x, height, color, tooltip text).
@@ -348,6 +380,19 @@ mod tests {
         assert!(d.len() <= 502);
         assert!(d.iter().any(|p| p[1] == 999.0));
         assert!(d.windows(2).all(|w| w[0][0] <= w[1][0]));
+    }
+
+    #[test]
+    fn constant_series_gets_a_minimum_range() {
+        let flat = vec![Series::line(
+            "v",
+            Color32::RED,
+            vec![[0.0, 8.17], [1.0, 8.2], [2.0, 8.18]],
+        )];
+        let (lo, hi) = y_range_with_min_span(&flat, Axis::SpeedKmh).unwrap();
+        assert!((hi - lo - 2.0).abs() < 1e-9 && lo < 8.17 && hi > 8.2);
+        let wide = vec![Series::line("v", Color32::RED, vec![[0.0, 6.0], [1.0, 12.0]])];
+        assert!(y_range_with_min_span(&wide, Axis::SpeedKmh).is_none());
     }
 
     #[test]

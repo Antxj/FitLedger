@@ -40,33 +40,33 @@ pub fn level_card(ui: &mut Ui, g: &game::State) {
         ui.horizontal(|ui| {
             ui.label(RichText::new(format!("🔥 {}", g.streak)).size(16.0).strong().color(widgets::WARN));
             ui.label(weak(ui, trf!(
-                "semana(s) consistente(s) seguida(s) · recorde {}",
-                "consistent week(s) in a row · best {}",
+                "semana(s) seguida(s) com treino · recorde {}",
+                "week(s) in a row with a session · best {}",
                 g.best_streak
             )));
             widgets::help(
                 ui,
                 tr!(
-                    "Semana consistente: pelo menos 2/3 dos treinos do plano feitos. Descanso nunca quebra a sequência; uma semana ruim a cada 8 é perdoada; semanas marcadas como doente/viagem não contam.",
-                    "Consistent week: at least 2/3 of the plan's sessions done. Rest never breaks the streak; one bad week in 8 is forgiven; weeks marked as sick/travel do not count."
+                    "Uma semana conta quando você faz pelo menos 1 treino do plano (com 2 ou mais, a medalha é dourada). Uma semana sem treino a cada 8 é perdoada; semanas marcadas como doente/viagem não contam.",
+                    "A week counts when you do at least 1 plan session (2 or more earn a gold medal). One week without a session in 8 is forgiven; weeks marked as sick/travel do not count."
                 ),
             );
         });
         // last 10 weeks as medals
         ui.horizontal(|ui| {
             for w in g.weeks.iter().rev().take(10).collect::<Vec<_>>().into_iter().rev() {
-                let (txt, color, tip) = match (w.consistent, w.joker_used, w.perfect) {
-                    (_, _, true) => ("●", GOLD, tr!("semana perfeita", "perfect week")),
-                    (Some(true), _, _) => ("●", widgets::GOOD, tr!("consistente", "consistent")),
+                let (txt, color, tip) = match (w.consistent, w.joker_used, w.two) {
+                    (None, _, _) => ("◌", Color32::GRAY, tr!("doente/viagem: não conta", "sick/travel: not counted")),
+                    (Some(true), _, true) => ("●", GOLD, tr!("2 ou mais treinos", "2 or more sessions")),
+                    (Some(true), _, _) => ("●", widgets::GOOD, tr!("treinou", "trained")),
                     (Some(false), true, _) => ("◐", widgets::WARN, tr!("perdoada (coringa)", "forgiven (joker)")),
-                    (Some(false), false, _) => ("○", widgets::BAD, tr!("abaixo de 2/3", "below 2/3")),
-                    (None, _, _) => ("◌", Color32::GRAY, tr!("não conta", "not counted")),
+                    (Some(false), false, _) => ("○", widgets::BAD, tr!("sem treino", "no session")),
                 };
-                ui.label(RichText::new(txt).size(18.0).color(color)).on_hover_text(format!(
-                    "{} · {}/{} · {tip}",
+                ui.label(RichText::new(txt).size(18.0).color(color)).on_hover_text(trf!(
+                    "semana de {} · {} treino(s) · {tip}",
+                    "week of {} · {} session(s) · {tip}",
                     format::date_short(w.start),
-                    w.done,
-                    w.planned
+                    w.done
                 ));
             }
         });
@@ -321,8 +321,8 @@ pub fn show_page(app: &mut App, ui: &mut Ui) {
                     game::XP_GOAL_BONUS
                 ),
                 trf!(
-                    "Missão da semana / semana consistente: +{} XP",
-                    "Weekly mission / consistent week: +{} XP",
+                    "Missão da semana / semana com treino: +{} XP",
+                    "Weekly mission / week with a session: +{} XP",
                     game::XP_MISSION
                 ),
                 trf!(
@@ -405,8 +405,9 @@ pub fn show_page(app: &mut App, ui: &mut Ui) {
     });
 }
 
-/// The way to the goal as a trail: distance milestones (reached with the
-/// date) and the goal at the end, with "you are here".
+/// The way to the goal as a trail: distance milestones (or, once the
+/// distance is there, heart-rate milestones), reached with the date, and the
+/// goal at the end, with "you are here".
 pub fn journey(ui: &mut Ui, c: &crate::coach::store::CoachState, runs: &[crate::model::Activity]) {
     use crate::coach::fitness::day;
     let goal_km = c.goal.distance_m / 1000.0;
@@ -444,9 +445,37 @@ pub fn journey(ui: &mut Ui, c: &crate::coach::store::CoachState, runs: &[crate::
     };
     let mut nodes: Vec<(String, Option<chrono::NaiveDate>, bool)> =
         vec![(tr!("Início", "Start").into(), Some(c.goal.start_date), true)];
-    for m in &marks {
-        let r = reached(*m);
-        nodes.push((format!("{} km", format::num_trim(*m, 1)), r, r.is_some()));
+    // the distance is already there and the goal is about heart rate: the
+    // milestones are the HR at goal pace coming down
+    let hr = &c.fitness.hr_history;
+    let hr_start = hr.iter().find(|x| x.0 >= c.goal.start_date).or(hr.first()).map(|x| x.1);
+    match (c.goal.target_hr, hr_start) {
+        (Some(target), Some(from)) if marks.iter().all(|m| reached(*m).is_some()) && from > target + 2.0 => {
+            let step = if from - target <= 15.0 { 3.0 } else { 5.0 };
+            let mut m = (from / step).floor() * step;
+            while m > target + 1.0 {
+                // a run below the milestone, or today's estimate (all recent runs) below it
+                let r = hr
+                    .iter()
+                    .find(|x| x.0 >= c.goal.start_date && x.1 <= m)
+                    .map(|x| x.0)
+                    .or_else(|| {
+                        c.fitness
+                            .hr_at_goal_pace
+                            .filter(|h| *h <= m)
+                            .and(hr.last().map(|x| x.0))
+                    });
+                nodes.push((format!("{} bpm", m.round()), r, r.is_some()));
+                m -= step;
+            }
+            nodes.truncate(8);
+        }
+        _ => {
+            for m in &marks {
+                let r = reached(*m);
+                nodes.push((format!("{} km", format::num_trim(*m, 1)), r, r.is_some()));
+            }
+        }
     }
     let goal_done = c.reached.map(|r| r.0);
     nodes.push((tr!("🏆 Meta", "🏆 Goal").into(), goal_done, goal_done.is_some()));

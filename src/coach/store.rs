@@ -1,10 +1,10 @@
 //! Persistence of the coach and the `refresh` that ties everything together:
-//! link runs to sessions → assess fitness → review → rebuild the future.
+//! link runs to the queue → assess fitness → review → rebuild the queue.
 
 use super::adapt::{self, Adjust, Note, Tracked};
 use super::fitness::{self, Fitness, Inputs};
-use super::plan::{self, Projection};
-use super::{Goal, Session, Status};
+use super::plan::{self, Context, Projection};
+use super::{Goal, Phase, Session, SessionKind, Status};
 use crate::analysis::metrics;
 use crate::db::{Db, Result, now};
 use crate::model::Activity;
@@ -27,20 +27,27 @@ pub struct CoachState {
     pub fitness: Fitness,
     pub projection: Projection,
     pub adjust: Adjust,
-    /// Every session of the goal, past and future, by date.
+    /// Sessions of the goal: the ones done (by date), then the queue.
     pub sessions: Vec<Tracked>,
     pub reached: Option<(NaiveDate, i64)>,
 }
 
 impl CoachState {
-    pub fn next_session(&self, today: NaiveDate) -> Option<&Tracked> {
-        self.sessions
-            .iter()
-            .find(|s| s.session.date >= today && s.status == Status::Planned)
+    /// The next sessions, in order.
+    pub fn queue(&self) -> Vec<&Tracked> {
+        self.sessions.iter().filter(|s| s.activity_id.is_none()).collect()
     }
 
-    pub fn today(&self, today: NaiveDate) -> Vec<&Tracked> {
-        self.sessions.iter().filter(|s| s.session.date == today).collect()
+    pub fn next_session(&self) -> Option<&Tracked> {
+        self.sessions.iter().find(|s| s.activity_id.is_none())
+    }
+
+    /// Plan sessions done on `day`.
+    pub fn done_on(&self, day: NaiveDate) -> Vec<&Tracked> {
+        self.sessions
+            .iter()
+            .filter(|s| s.activity_id.is_some() && s.session.date == day)
+            .collect()
     }
 }
 
@@ -80,8 +87,8 @@ impl Db {
                 params![id, goal.id, date_str(goal.start_date)],
             )?;
             tx.execute(
-                "DELETE FROM coach_session WHERE goal_id = ?1 AND activity_id IS NULL AND date >= ?2",
-                params![goal.id, date_str(goal.start_date)],
+                "DELETE FROM coach_session WHERE goal_id = ?1 AND activity_id IS NULL",
+                [goal.id],
             )?;
         }
         tx.commit()?;
@@ -164,26 +171,27 @@ impl Db {
 
     fn update_tracked(&self, t: &Tracked) -> Result<()> {
         self.conn.execute(
-            "UPDATE coach_session SET status = ?2, activity_id = ?3 WHERE id = ?1",
-            params![t.id, t.status.code(), t.activity_id],
+            "UPDATE coach_session SET status = ?2, activity_id = ?3, date = ?4, json = ?5 WHERE id = ?1",
+            params![
+                t.id,
+                t.status.code(),
+                t.activity_id,
+                date_str(t.session.date),
+                serde_json::to_string(&t.session).unwrap_or_default()
+            ],
         )?;
         Ok(())
     }
 
-    /// Replaces the sessions from `today` on that have no run yet.
-    fn replace_future(
-        &mut self,
-        goal_id: i64,
-        today: NaiveDate,
-        sessions: &[Session],
-        keep_days: &[NaiveDate],
-    ) -> Result<()> {
+    /// Replaces the queue (every session without a run, including the
+    /// "missed" ones of the fixed-day plans before 0.4).
+    fn replace_queue(&mut self, goal_id: i64, sessions: &[Session]) -> Result<()> {
         let tx = self.conn.transaction()?;
         tx.execute(
-            "DELETE FROM coach_session WHERE goal_id = ?1 AND date >= ?2 AND activity_id IS NULL",
-            params![goal_id, date_str(today)],
+            "DELETE FROM coach_session WHERE goal_id = ?1 AND activity_id IS NULL",
+            [goal_id],
         )?;
-        for s in sessions.iter().filter(|s| !keep_days.contains(&s.date)) {
+        for s in sessions {
             tx.execute(
                 "INSERT INTO coach_session(goal_id, date, json, status) VALUES(?1, ?2, ?3, 'planned')",
                 params![goal_id, date_str(s.date), serde_json::to_string(s).unwrap_or_default()],
@@ -254,7 +262,46 @@ pub fn runs(db: &Db) -> Vec<Activity> {
         .collect()
 }
 
-/// Links runs, reviews the last weeks and rebuilds the future sessions.
+/// What the queue needs from the sessions done so far.
+fn context(
+    tracked: &[Tracked],
+    runs: &[Activity],
+    metrics: &std::collections::HashMap<i64, metrics::Metrics>,
+    easy_cap: f64,
+) -> Context {
+    let mut done: Vec<&Tracked> = tracked.iter().filter(|t| t.activity_id.is_some()).collect();
+    done.sort_by_key(|t| (t.session.date, t.id));
+    let last_run = runs.iter().max_by_key(|r| r.start_time).map(|r| {
+        let planned = tracked
+            .iter()
+            .find(|t| t.activity_id == Some(r.id))
+            .map(|t| t.session.kind);
+        let above_easy = metrics.get(&r.id).is_some_and(|m| {
+            let total: f64 = m.zones_s.iter().sum();
+            total > 60.0 && (m.zones_s[3] + m.zones_s[4] + m.zones_s[5]) / total > 0.3
+        }) || (metrics.get(&r.id).is_none() && r.avg_hr.is_some_and(|h| h > easy_cap + 5.0));
+        let hard = planned.is_some_and(|k| k == SessionKind::Long || k.is_hard()) || above_easy;
+        (fitness::day(r), hard)
+    });
+    Context {
+        done: done.len(),
+        last_run,
+        last_check: done
+            .iter()
+            .filter(|t| t.session.kind == SessionKind::Check)
+            .map(|t| t.session.date)
+            .max(),
+        since_attempt: done
+            .iter()
+            .rposition(|t| t.session.kind == SessionKind::GoalAttempt)
+            .map(|i| done.len() - 1 - i),
+        tapered: done
+            .last()
+            .is_some_and(|t| t.session.phase == Phase::Taper && t.session.kind == SessionKind::Easy),
+    }
+}
+
+/// Links runs, reviews the last runs and rebuilds the queue.
 /// `goal_changed` adds a note saying so.
 pub fn refresh(db: &mut Db, today: NaiveDate, goal_changed: bool) -> Result<Option<CoachState>> {
     let Some(goal) = db.active_goal()? else { return Ok(None) };
@@ -265,7 +312,7 @@ pub fn refresh(db: &mut Db, today: NaiveDate, goal_changed: bool) -> Result<Opti
     let best = db.best_efforts();
 
     let mut tracked = db.tracked_sessions(goal.id)?;
-    for id in adapt::match_runs(&mut tracked, &runs, today) {
+    for id in adapt::match_runs(&mut tracked, &runs, goal.start_date) {
         if let Some(t) = tracked.iter().find(|t| t.id == id) {
             db.update_tracked(t)?;
         }
@@ -281,14 +328,7 @@ pub fn refresh(db: &mut Db, today: NaiveDate, goal_changed: bool) -> Result<Opti
         &goal,
     );
     let reached = plan::goal_reached(&goal, &runs, &best);
-    // weeks marked as sick/travel do not count as missed sessions
-    let sick = super::game::load_sick_weeks(db);
-    let counted: Vec<Tracked> = tracked
-        .iter()
-        .filter(|t| !sick.contains(&super::week_start(t.session.date)))
-        .cloned()
-        .collect();
-    let mut adjust = adapt::review(&counted, &runs, &metrics, today);
+    let mut adjust = adapt::review(&tracked, &runs, &metrics, today);
     if let Some((on, by)) = reached {
         db.mark_reached(goal.id, on, by)?;
         adjust.notes.insert(0, Note::GoalReached { date: on });
@@ -296,8 +336,16 @@ pub fn refresh(db: &mut Db, today: NaiveDate, goal_changed: bool) -> Result<Opti
     if goal_changed {
         adjust.notes.insert(0, Note::GoalChanged);
     }
-    let (sessions, projection) =
-        plan::generate(&goal, &fitness, &adjust, zones.lower[3] - 1.0, today, reached.is_some());
+    let ctx = context(&tracked, &runs, &metrics, zones.range(2).1);
+    let (queue, projection) = plan::generate(
+        &goal,
+        &fitness,
+        &adjust,
+        zones.lower[3] - 1.0,
+        today,
+        reached.is_some(),
+        &ctx,
+    );
     if let (Some(avail), false) = (projection.weeks_available, reached.is_some())
         && projection.weeks > avail
     {
@@ -306,13 +354,21 @@ pub fn refresh(db: &mut Db, today: NaiveDate, goal_changed: bool) -> Result<Opti
             weeks_available: avail,
         });
     }
-    // days that already have a run keep their session
-    let keep: Vec<NaiveDate> = tracked
-        .iter()
-        .filter(|t| t.activity_id.is_some() && t.session.date >= today)
-        .map(|t| t.session.date)
-        .collect();
-    db.replace_future(goal.id, today, &sessions, &keep)?;
+    // how much sooner with one more run a week
+    let per_week = fitness.runs_per_week;
+    if reached.is_none() && per_week > 0.0 && per_week < 2.5 {
+        let more = (per_week.round() as u32 + 1).clamp(2, 3);
+        let sooner = plan::project_at(&goal, &fitness, today, more as f64);
+        if sooner.weeks + 2 <= projection.weeks {
+            adjust.notes.push(Note::Rhythm {
+                per_week,
+                weeks: projection.weeks,
+                more,
+                more_weeks: sooner.weeks,
+            });
+        }
+    }
+    db.replace_queue(goal.id, &queue)?;
     db.log_notes(goal.id, &adjust.notes, &adjust.evidence)?;
     let sessions = db.tracked_sessions(goal.id)?;
     Ok(Some(CoachState {
@@ -351,15 +407,14 @@ mod tests {
             distance_m: 5000.0,
             target_hr: Some(160.0),
             hr_pace: Some(380.0),
-            days_per_week: 3,
-            start_date: today,
+            start_date: today - chrono::Duration::days(2),
             ..Default::default()
         };
         let id = db.set_goal(&g).unwrap();
         let st = refresh(&mut db, today, true).unwrap().unwrap();
         assert_eq!(st.goal.id, id);
-        assert!(!st.sessions.is_empty());
-        assert!(st.sessions.iter().all(|s| s.session.date >= today));
+        assert_eq!(st.queue().len(), plan::QUEUE);
+        assert!(st.queue().iter().all(|s| s.session.date >= today));
         assert!(st.adjust.notes.contains(&Note::GoalChanged));
         let n = st.sessions.len();
         // refreshing again is stable
@@ -370,16 +425,34 @@ mod tests {
             st.sessions.iter().map(|s| &s.session).collect::<Vec<_>>()
         );
 
-        // a new goal version replaces the future
+        // a run after the goal start fulfils the first session of the queue
+        let first = st.queue()[0].session.kind;
+        let start = (today - chrono::Duration::days(1))
+            .and_hms_opt(7, 0, 0)
+            .unwrap()
+            .and_utc()
+            .timestamp()
+            - crate::fit::activity::FIT_EPOCH;
+        let fit = Synthetic::run(start as u32, 1500, 2.6, 140.0, 155.0, true).encode();
+        crate::import::import_bytes(&mut db, "r2.fit", &fit).unwrap();
+        let st = refresh(&mut db, today, false).unwrap().unwrap();
+        let done: Vec<&Tracked> = st.sessions.iter().filter(|t| t.activity_id.is_some()).collect();
+        assert_eq!(done.len(), 1);
+        assert_eq!(done[0].session.kind, first);
+        assert_eq!(done[0].session.date, today - chrono::Duration::days(1));
+        assert_eq!(st.queue().len(), plan::QUEUE);
+
+        // a new goal version replaces the queue and keeps what was done
         let g2 = Goal {
             id,
-            days_per_week: 4,
+            distance_m: 8000.0,
             ..st.goal.clone()
         };
         let id2 = db.set_goal(&g2).unwrap();
         let st3 = refresh(&mut db, today, true).unwrap().unwrap();
         assert_eq!(st3.goal.id, id2);
         assert!(db.tracked_sessions(id).unwrap().is_empty());
+        assert_eq!(st3.sessions.iter().filter(|t| t.activity_id.is_some()).count(), 1);
         assert_eq!(db.goal_history().unwrap().len(), 2);
         assert!(!db.coach_log(id2, 10).unwrap().is_empty());
     }

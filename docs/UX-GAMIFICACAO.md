@@ -146,3 +146,10 @@ Cada fase sai como uma versão (0.3, 0.4…), com testes e capturas atualizadas.
   arrastar e soltar, pasta `fits` vigiada a cada 20 s, ajuda "?" nos termos técnicos, semana
   doente/viagem que não conta para o treinador nem para a sequência).
 - **Pendente (fase 4):** lembretes do Windows, calendário mensal, retrospectivas, tour e acessibilidade.
+- **v0.4.0 (09/11/2026):** sem dias fixos (decisão do usuário). A sequência passa a contar semanas
+  com pelo menos 1 treino do plano (2 ou mais = medalha dourada); as missões vêm da fila de treinos
+  ("2 treinos do plano esta semana", "uma corrida leve no esforço certo", o teste ou o longão da
+  fila); "Duas na semana" substitui "Semana consistente"; "Respeitou a fase leve" usa os ciclos
+  leves. O mapa da jornada mostra marcos de FC quando a distância já foi alcançada. A tela Hoje
+  mostra o próximo treino com "quando" (descanso depois de treino forte) e uma linha com os últimos
+  treinos feitos e os próximos.

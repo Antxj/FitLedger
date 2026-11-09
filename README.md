@@ -4,7 +4,7 @@
 
 <p align="center">
 <b>Your personal running coach for Windows.</b><br>
-Tell it your goal. It builds your training plan — and rebuilds it after every run you import.
+Tell it your goal. Run whenever you can. It tells you what to run next — and adapts after every run you import.
 <br><br>
 <a href="https://github.com/Antxj/FitLedger/releases/latest"><b>⬇ Download FitLedger.exe</b></a>
 &nbsp;·&nbsp; Free and open source &nbsp;·&nbsp; No account, no cloud, no subscription
@@ -15,16 +15,20 @@ Tell it your goal. It builds your training plan — and rebuilds it after every 
 ## Run lower. Run longer. Run faster.
 
 Whether you want to **run 5 km for the first time**, **finish 10 km in under an hour**, or
-**run at the same pace with a lower heart rate**, for goals **up to 10 km**, FitLedger turns that goal into a week-by-week
-schedule built for *you* — from the runs your watch already records.
+**run at the same pace with a lower heart rate**, for goals **up to 10 km**, FitLedger turns that goal into
+a plan built for *you* — from the runs your watch already records.
 
-- **Set a goal in seconds.** Distance, and optionally a finish time, a maximum average heart rate,
-  how many days a week you run, which days, and a target date. Change it anytime: the plan
-  adjusts instantly and your history stays.
-- **A plan that listens.** Import a run and the coach compares it with what was planned. Missed a
-  session? Nothing is "made up". Easy runs too hard? Volume grows more slowly. Long run with high
-  cardiac drift? It waits before getting longer. Logged high fatigue? The week gets lighter.
-  Every change comes with the data that triggered it.
+- **Set a goal in seconds.** Distance, and optionally a finish time, a maximum average heart rate
+  and a target date. Change it anytime: the plan adjusts instantly and your history stays.
+- **No fixed days.** Life happens. FitLedger shows your next sessions, not a calendar to fail:
+  every run you import fulfils the next one, and the next ones are sized from what you actually
+  run. Ran a hard session today? It suggests a rest day first. Back after two weeks off? The next
+  session is shorter. Running once a week? It tells you how much sooner you'd get there with twice.
+- **A plan that listens.** Easy runs too hard? Sessions grow more slowly. Long run with high
+  cardiac drift? It waits before getting longer. A big week or high fatigue? The next session is
+  lighter. Every change comes with the data that triggered it.
+- **Run + walk when it makes sense.** If keeping your heart rate in the easy zone means a very slow
+  pace, easy runs become jog/walk blocks — the walks shrink as your heart gets more efficient.
 - **Heart-rate first.** Easy runs have a clear heart-rate cap from *your* zones, and every session
   shows the pace range **and the matching treadmill speed** — road or treadmill, you know exactly
   what to do.
@@ -46,11 +50,12 @@ Motivation that rewards the right thing: **doing what the plan proposed**, not r
   planned size, at the planned effort (heart rate under the cap on easy runs, pace in range on
   harder ones) and on target — with the reason for each one.
 - **Levels and a weekly streak.** Points move you from *First Steps* to *Plan Master*. A week counts
-  when you do at least two thirds of its sessions; rest days never break the streak, one bad week in
-  eight is forgiven, and a week marked *sick/travel* does not count at all.
-- **Missions and achievements** taken from the plan itself: this week's sessions, easy runs at the
-  right effort, the progress check, your first 5 km, a lower heart rate at goal pace and more.
-- **A journey map** from where you started to the goal, with the milestones you have reached.
+  when you do at least one plan session (two or more earn a gold medal); one empty week in eight is
+  forgiven, and a week marked *sick/travel* does not count at all.
+- **Missions and achievements** taken from the plan itself: two sessions this week, an easy run at
+  the right effort, the progress check, your first 5 km, a lower heart rate at goal pace and more.
+- **A journey map** from where you started to the goal: distance milestones, or heart-rate
+  milestones once the distance is there.
 - Calm by default: a short celebration on a new level (can be turned off), and the whole thing can
   be switched off in *Settings*.
 
@@ -66,17 +71,19 @@ FitLedger's coach is built on well-established exercise science, applied conserv
 |---|---|
 | Heart-rate zones from your heart-rate **reserve**; easy runs capped at the top of zone 2 | Karvonen, Kentala & Mustala, *Ann Med Exp Biol Fenn* 1957 |
 | Estimated maximum heart rate = 208 − 0.7 × age when you don't know yours | Tanaka, Monahan & Seals, *J Am Coll Cardiol* 2001 |
-| Most of the training at low intensity; at most one harder session a week | Seiler & Kjerland, *Scand J Med Sci Sports* 2006 |
+| Most of the training at low intensity; at most one harder session in four | Seiler & Kjerland, *Scand J Med Sci Sports* 2006 |
 | Progress measured as **lower heart rate at the same pace** (progress checks + every run) | Buchheit, *Front Physiol* 2014 |
 | Cardiac drift (aerobic decoupling) to judge long runs | Coyle & González-Alonso, *Exerc Sport Sci Rev* 2001 |
 | Training load from duration and heart rate (TRIMP) | Banister, *Physiological Testing of the High-Performance Athlete* 1991 |
 | Finish-time prediction for the goal distance | Riegel, *American Scientist* 1981 |
-| Gradual weekly increases (big jumps raise injury risk in novice runners) | Nielsen et al., *JOSPT* 2014; Buist et al., *Am J Sports Med* 2008 |
-| Phases and a lighter week every fourth week | Issurin, *Sports Med* 2010 |
+| Gradual increases from what you actually run (big jumps raise injury risk in novice runners) | Nielsen et al., *JOSPT* 2014; Buist et al., *Am J Sports Med* 2008 |
+| Phases, a lighter cycle every few sessions, rest after hard sessions | Issurin, *Sports Med* 2010 |
+| Run + walk when the easy pace is very slow | Galloway, *Galloway's Book on Running* 2002; Hottenrott et al., *J Sci Med Sport* 2016 |
 
 Some numbers are FitLedger's own conservative choices rather than findings of a specific study:
-weekly time grows at most 8% and the long run about 10%; with no trend yet it assumes an
-improvement of 0.8% a week in time and 0.4 bpm a week in heart rate; it warns about drift above 8%
+the easy run grows up to 5% and the long run up to 10% at a time, from the median of your last three
+runs; a progress check every ~18 days; with no trend yet it assumes an improvement of 0.8% a week in
+time and 0.4 bpm a week in heart rate at three runs a week; it warns about drift above 8%
 or easy runs spending more than 30% of the time above zone 2. Your own data replaces these
 assumptions as you run. The full list, with complete references, is in the app under
 *Plan → Scientific basis*.

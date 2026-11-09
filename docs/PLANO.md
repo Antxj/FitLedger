@@ -7,6 +7,17 @@ O objetivo do usuário é:
 - **reduzir a FC** na corrida;
 - e/ou bater uma meta de **distância ou tempo**.
 
+> **v0.4 (09/11/2026): sem dias fixos.** A meta não tem mais dias por semana, dias preferidos nem
+> dia do longão. O plano virou uma **fila** com os próximos 3 treinos: cada corrida importada cumpre
+> o próximo, nada fica "perdido". O tamanho vem da mediana das últimas 3 corridas (leve +5%,
+> longão +10% de cada vez); descanso de 1 dia depois de treino forte; pausa de mais de 14 dias deixa
+> o próximo treino menor; muitos minutos em 7 dias deixam o próximo mais leve; a cada 4 treinos,
+> leve/longão/leve/especial (teste a cada ~18 dias; intervalado ou ritmo moderado só com 2+
+> corridas por semana); corrida + caminhada quando o ritmo leve passa de 9:00/km. A estimativa usa
+> a frequência real e o treinador diz quanto antes a meta chegaria com uma corrida a mais por
+> semana. A sequência conta semanas com pelo menos 1 treino do plano. As seções abaixo descrevem o
+> desenho da v0.2.
+
 ---
 
 ## 1. Como funciona

@@ -7,7 +7,7 @@
 
 use super::adapt::Tracked;
 use super::fitness::day;
-use super::{SessionKind, Status, week_start};
+use super::{Phase, SessionKind, Status, week_start};
 use crate::analysis::metrics::Metrics;
 use crate::format;
 use crate::model::{Activity, Modality};
@@ -251,55 +251,52 @@ impl Level {
     }
 }
 
-/// One week of the plan for the streak.
+/// One week for the streak.
 #[derive(Debug, Clone, PartialEq)]
 pub struct WeekResult {
     pub start: NaiveDate,
-    pub planned: usize,
+    /// Plan sessions done.
     pub done: usize,
-    /// None = not counted (sick/travel or nothing planned).
+    /// None = not counted (sick/travel).
     pub consistent: Option<bool>,
     pub joker_used: bool,
+    /// Two or more plan sessions (gold medal).
+    pub two: bool,
+    /// Two or more plan sessions, all with 3 stars.
     pub perfect: bool,
 }
 
-/// Consistent week: at least 2/3 of the planned sessions done. One "joker" per
-/// 8 weeks keeps the streak alive through a bad week.
+/// There are no fixed days, so a week counts when at least one plan session
+/// was done. Weeks go from the first plan session to now; the current week
+/// only shows once it counts. One "joker" per 8 weeks forgives a week.
 pub fn weeks(
     sessions: &[Tracked],
     scores: &HashMap<i64, Score>,
     sick: &HashSet<NaiveDate>,
     today: NaiveDate,
 ) -> Vec<WeekResult> {
-    let mut by_week: BTreeMap<NaiveDate, Vec<&Tracked>> = BTreeMap::new();
-    for t in sessions {
-        by_week.entry(week_start(t.session.date)).or_default().push(t);
-    }
+    let done: Vec<&Tracked> = sessions.iter().filter(|t| t.activity_id.is_some()).collect();
+    let Some(first) = done.iter().map(|t| t.session.date).min() else {
+        return Vec::new();
+    };
     let current = week_start(today);
     let mut out = Vec::new();
-    for (ws, list) in by_week {
-        if ws >= current {
-            continue;
+    let mut ws = week_start(first);
+    while ws <= current {
+        let list: Vec<&&Tracked> = done.iter().filter(|t| week_start(t.session.date) == ws).collect();
+        let n = list.len();
+        if ws == current && n == 0 {
+            break;
         }
-        let planned = list.len();
-        let done = list
-            .iter()
-            .filter(|t| matches!(t.status, Status::Done | Status::Partial))
-            .count();
-        let consistent = if sick.contains(&ws) || planned == 0 {
-            None
-        } else {
-            Some(done * 3 >= planned * 2)
-        };
-        let perfect = planned > 0 && list.iter().all(|t| scores.get(&t.id).is_some_and(|s| s.stars() == 3));
         out.push(WeekResult {
             start: ws,
-            planned,
-            done,
-            consistent,
+            done: n,
+            consistent: if sick.contains(&ws) { None } else { Some(n >= 1) },
             joker_used: false,
-            perfect,
+            two: n >= 2,
+            perfect: n >= 2 && list.iter().all(|t| scores.get(&t.id).is_some_and(|s| s.stars() == 3)),
         });
+        ws += Duration::days(7);
     }
     out
 }
@@ -340,51 +337,66 @@ impl Mission {
     }
 }
 
-/// 2–3 missions for the current week, taken from the plan itself.
+/// 2–3 missions for the current week, taken from the plan itself (the
+/// queue and what was done this week).
 pub fn missions(sessions: &[Tracked], scores: &HashMap<i64, Score>, today: NaiveDate) -> Vec<Mission> {
     let ws = week_start(today);
-    let week: Vec<&Tracked> = sessions.iter().filter(|t| week_start(t.session.date) == ws).collect();
-    if week.is_empty() {
+    let week: Vec<&Tracked> = sessions
+        .iter()
+        .filter(|t| t.activity_id.is_some() && week_start(t.session.date) == ws)
+        .collect();
+    let queue: Vec<&Tracked> = sessions
+        .iter()
+        .filter(|t| t.activity_id.is_none() && t.status == Status::Planned)
+        .collect();
+    if week.is_empty() && queue.is_empty() {
         return Vec::new();
     }
+    let easy = |t: &&&Tracked| matches!(t.session.kind, SessionKind::Easy | SessionKind::Long);
     let mut out = vec![Mission {
-        text: trf!("Faça os {} treinos da semana", "Do this week's {} sessions", week.len()),
-        done: week
-            .iter()
-            .filter(|t| matches!(t.status, Status::Done | Status::Partial))
-            .count() as u32,
-        target: week.len() as u32,
+        text: tr!(
+            "Faça 2 treinos do plano esta semana (1 já mantém a sequência)",
+            "Do 2 plan sessions this week (1 keeps the streak)"
+        )
+        .into(),
+        done: week.len().min(2) as u32,
+        target: 2,
     }];
-    let easy: Vec<&&Tracked> = week
+    if let Some(cap) = queue
         .iter()
-        .filter(|t| matches!(t.session.kind, SessionKind::Easy | SessionKind::Long))
-        .collect();
-    if !easy.is_empty() {
-        let cap = easy[0].session.hr_max.map(|h| h.round()).unwrap_or(0.0);
+        .chain(week.iter())
+        .filter(easy)
+        .find_map(|t| t.session.hr_max)
+    {
         out.push(Mission {
             text: trf!(
-                "Faça {} corrida(s) leve(s) no esforço certo (FC ≤ {} bpm)",
-                "Do {} easy run(s) at the right effort (HR ≤ {} bpm)",
-                easy.len(),
-                cap
+                "Faça uma corrida leve no esforço certo (FC ≤ {} bpm)",
+                "Do an easy run at the right effort (HR ≤ {} bpm)",
+                cap.round()
             ),
-            done: easy
+            done: week
                 .iter()
-                .filter(|t| scores.get(&t.id).is_some_and(|s| s.star_effort))
-                .count() as u32,
-            target: easy.len() as u32,
-        });
-    }
-    if let Some(c) = week.iter().find(|t| t.session.kind == SessionKind::Check) {
-        out.push(Mission {
-            text: tr!("Complete o teste de evolução", "Complete the progress check").into(),
-            done: scores.get(&c.id).is_some_and(|s| s.star_target) as u32,
+                .filter(easy)
+                .any(|t| scores.get(&t.id).is_some_and(|s| s.star_effort)) as u32,
             target: 1,
         });
-    } else if let Some(l) = week.iter().find(|t| t.session.kind == SessionKind::Long) {
+    }
+    let has = |k: SessionKind| queue.iter().chain(week.iter()).any(|t| t.session.kind == k);
+    let hit = |k: SessionKind| {
+        week.iter()
+            .filter(|t| t.session.kind == k)
+            .any(|t| scores.get(&t.id).is_some_and(|s| s.star_target)) as u32
+    };
+    if has(SessionKind::Check) {
+        out.push(Mission {
+            text: tr!("Complete o teste de evolução", "Complete the progress check").into(),
+            done: hit(SessionKind::Check),
+            target: 1,
+        });
+    } else if has(SessionKind::Long) {
         out.push(Mission {
             text: tr!("Faça o longão sem exagerar", "Do the long run without overdoing it").into(),
-            done: scores.get(&l.id).is_some_and(|s| s.star_target) as u32,
+            done: hit(SessionKind::Long),
             target: 1,
         });
     }
@@ -527,21 +539,12 @@ pub fn compute(inp: &Inputs) -> State {
         }
         out
     };
-    let first_week = weeks
-        .iter()
-        .find(|w| w.consistent == Some(true))
-        .map(|w| w.start + Duration::days(6));
+    let first_week = weeks.iter().find(|w| w.two).map(|w| w.start + Duration::days(6));
     let perfect_week = weeks.iter().find(|w| w.perfect).map(|w| w.start + Duration::days(6));
-    let light_week = weeks
+    let light_week = scored
         .iter()
-        .find(|w| {
-            w.consistent == Some(true)
-                && inp
-                    .sessions
-                    .iter()
-                    .any(|t| week_start(t.session.date) == w.start && t.session.week % 4 == 0)
-        })
-        .map(|w| w.start + Duration::days(6));
+        .find(|(t, s)| t.session.phase == Phase::Light && s.star_effort && s.star_target)
+        .map(|(t, _)| t.session.date);
     let low_drift = scored
         .iter()
         .filter(|(t, _)| t.session.kind == SessionKind::Long)
@@ -628,10 +631,10 @@ pub fn compute(inp: &Inputs) -> State {
         ach(
             "first_week",
             "📅",
-            "Semana consistente",
-            "Consistent week",
-            "Faça pelo menos 2/3 dos treinos de uma semana.",
-            "Do at least 2/3 of a week's sessions.",
+            "Duas na semana",
+            "Two in a week",
+            "Faça 2 treinos do plano na mesma semana.",
+            "Do 2 plan sessions in the same week.",
             first_week,
             None,
             false,
@@ -641,8 +644,8 @@ pub fn compute(inp: &Inputs) -> State {
             "🌟",
             "Semana perfeita",
             "Perfect week",
-            "Todos os treinos de uma semana com 3 estrelas.",
-            "Every session of a week with 3 stars.",
+            "2 ou mais treinos numa semana, todos com 3 estrelas.",
+            "2 or more sessions in a week, all with 3 stars.",
             perfect_week,
             None,
             true,
@@ -652,8 +655,8 @@ pub fn compute(inp: &Inputs) -> State {
             "🔥",
             "4 semanas seguidas",
             "4-week streak",
-            "4 semanas consistentes seguidas.",
-            "4 consistent weeks in a row.",
+            "4 semanas seguidas com pelo menos 1 treino do plano.",
+            "4 weeks in a row with at least 1 plan session.",
             nth(&consistent_weeks, 4),
             Some(((consistent_weeks.len() as u32).min(4), 4)),
             true,
@@ -663,8 +666,8 @@ pub fn compute(inp: &Inputs) -> State {
             "🔥",
             "8 semanas seguidas",
             "8-week streak",
-            "8 semanas consistentes seguidas.",
-            "8 consistent weeks in a row.",
+            "8 semanas seguidas com pelo menos 1 treino do plano.",
+            "8 weeks in a row with at least 1 plan session.",
             nth(&consistent_weeks, 8),
             Some(((consistent_weeks.len() as u32).min(8), 8)),
             true,
@@ -674,8 +677,8 @@ pub fn compute(inp: &Inputs) -> State {
             "🔥",
             "12 semanas seguidas",
             "12-week streak",
-            "12 semanas consistentes seguidas.",
-            "12 consistent weeks in a row.",
+            "12 semanas seguidas com pelo menos 1 treino do plano.",
+            "12 weeks in a row with at least 1 plan session.",
             nth(&consistent_weeks, 12),
             Some(((consistent_weeks.len() as u32).min(12), 12)),
             true,
@@ -694,10 +697,10 @@ pub fn compute(inp: &Inputs) -> State {
         ach(
             "light_week",
             "🌙",
-            "Respeitou a semana leve",
-            "Took the light week",
-            "Cumpra uma semana leve do plano sem exagerar.",
-            "Complete a light week of the plan without overdoing it.",
+            "Respeitou a fase leve",
+            "Took the light phase",
+            "Faça um treino da fase leve do plano sem exagerar (esforço e tamanho certos).",
+            "Do a session of the plan's light phase without overdoing it (right effort and size).",
             light_week,
             None,
             false,
@@ -884,7 +887,7 @@ pub fn save_seen(db: &crate::db::Db, seen: &HashSet<String>) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::coach::{Phase, Session};
+    use crate::coach::Session;
 
     fn d(s: &str) -> NaiveDate {
         NaiveDate::parse_from_str(s, "%Y-%m-%d").unwrap()
@@ -954,10 +957,10 @@ mod tests {
     fn streak_with_joker_and_sick_weeks() {
         let mk = |c: Option<bool>| WeekResult {
             start: d("2026-01-05"),
-            planned: 3,
             done: 0,
             consistent: c,
             joker_used: false,
+            two: false,
             perfect: false,
         };
         let mut w: Vec<WeekResult> = [
@@ -979,6 +982,25 @@ mod tests {
         assert!(!w[6].joker_used);
         assert_eq!(cur, 0);
         assert_eq!(best, 4);
+    }
+
+    #[test]
+    fn a_week_without_runs_breaks_the_streak_unless_marked() {
+        let today = d("2026-11-09");
+        let sessions = vec![
+            sess(1, "2026-10-20", SessionKind::Easy, 30.0, Status::Done, Some(10), 1),
+            sess(2, "2026-11-03", SessionKind::Easy, 30.0, Status::Done, Some(11), 1),
+        ];
+        let scores = HashMap::new();
+        let w = weeks(&sessions, &scores, &HashSet::new(), today);
+        // 10/19 yes, 10/26 no, 11/02 yes; the current week has nothing yet
+        assert_eq!(
+            w.iter().map(|w| w.consistent).collect::<Vec<_>>(),
+            vec![Some(true), Some(false), Some(true)]
+        );
+        let sick: HashSet<NaiveDate> = [d("2026-10-26")].into_iter().collect();
+        let w = weeks(&sessions, &scores, &sick, today);
+        assert_eq!(w[1].consistent, None);
     }
 
     #[test]
@@ -1013,11 +1035,13 @@ mod tests {
             sick_weeks: &HashSet::new(),
             today,
         });
-        assert_eq!(st.streak, 1);
-        assert_eq!(st.weeks.len(), 1);
-        assert!(st.weeks[0].perfect);
+        // the week of 10/12 (3 sessions) and the current one (1 so far) count
+        assert_eq!(st.streak, 2);
+        assert_eq!(st.weeks.len(), 2);
+        assert!(st.weeks[0].perfect && st.weeks[0].two && !st.weeks[1].two);
         assert_eq!(st.missions.len(), 3);
-        assert_eq!((st.missions[0].done, st.missions[0].target), (1, 3));
+        assert_eq!((st.missions[0].done, st.missions[0].target), (1, 2));
+        assert_eq!((st.missions[1].done, st.missions[1].target), (1, 1));
         assert!(st.missions[2].text.contains("teste") || st.missions[2].text.contains("check"));
         let unlocked: Vec<&str> = st
             .achievements

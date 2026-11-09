@@ -4,7 +4,7 @@
 use crate::analysis::metrics::Metrics;
 use crate::coach::fitness::day;
 use crate::coach::store::CoachState;
-use crate::coach::{Status, week_start};
+use crate::coach::week_start;
 use crate::format;
 use crate::model::Activity;
 use chrono::{Duration, NaiveDate};
@@ -176,8 +176,8 @@ pub struct Week {
     pub hr_sum: f64,
     pub hr_w: f64,
     pub longest_km: f64,
-    pub planned: usize,
-    pub done: usize,
+    /// Runs that fulfilled a session of the plan.
+    pub plan: usize,
 }
 
 pub fn weeks(
@@ -209,13 +209,9 @@ pub fn weeks(
         for t in c
             .sessions
             .iter()
-            .filter(|t| t.session.date >= from && t.session.date <= to && t.status != Status::Planned)
+            .filter(|t| t.activity_id.is_some() && t.session.date >= from && t.session.date <= to)
         {
-            let w = out.entry(week_start(t.session.date)).or_default();
-            w.planned += 1;
-            if matches!(t.status, Status::Done | Status::Partial) {
-                w.done += 1;
-            }
+            out.entry(week_start(t.session.date)).or_default().plan += 1;
         }
     }
     out
@@ -223,16 +219,7 @@ pub fn weeks(
 
 pub fn weeks_table(w: &BTreeMap<NaiveDate, Week>) -> Table {
     Table {
-        header: vec![
-            "week",
-            "runs",
-            "km",
-            "hours",
-            "avg_hr",
-            "longest_km",
-            "planned_sessions",
-            "done_sessions",
-        ],
+        header: vec!["week", "runs", "km", "hours", "avg_hr", "longest_km", "plan_sessions"],
         rows: w
             .iter()
             .map(|(d, x)| {
@@ -243,8 +230,7 @@ pub fn weeks_table(w: &BTreeMap<NaiveDate, Week>) -> Table {
                     round(Some(x.secs / 3600.0), 2),
                     round((x.hr_w > 0.0).then(|| x.hr_sum / x.hr_w), 0),
                     round(Some(x.longest_km), 2),
-                    json!(x.planned),
-                    json!(x.done),
+                    json!(x.plan),
                 ]
             })
             .collect(),
@@ -548,16 +534,15 @@ pub fn html(
         &|v| format!("{} km", format::num(v, 1)),
         None,
     ));
-    let planned: usize = w.values().map(|x| x.planned).sum();
-    let done: usize = w.values().map(|x| x.done).sum();
-    if planned > 0 {
+    let plan: usize = w.values().map(|x| x.plan).sum();
+    let total: usize = w.values().map(|x| x.runs).sum();
+    if plan > 0 {
         let _ = write!(
             h,
             "<p>{}</p>",
             esc(&trf!(
-                "Aderência ao plano: {done} de {planned} treinos ({}%).",
-                "Plan adherence: {done} of {planned} sessions ({}%).",
-                (done as f64 / planned as f64 * 100.0).round()
+                "{plan} de {total} corridas foram treinos do plano.",
+                "{plan} of {total} runs were plan sessions."
             ))
         );
     }
@@ -570,8 +555,7 @@ pub fn html(
             tr!("Horas", "Hours"),
             tr!("FC média", "Avg HR"),
             tr!("Maior (km)", "Longest (km)"),
-            tr!("Planejados", "Planned"),
-            tr!("Feitos", "Done"),
+            tr!("Treinos do plano", "Plan sessions"),
         ],
     ));
     // pace and drift over time

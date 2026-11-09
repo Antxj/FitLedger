@@ -65,8 +65,13 @@ pub struct Fitness {
     /// Average running minutes per week over the last 3 full weeks.
     pub weekly_minutes: f64,
     pub weekly_km: f64,
-    /// Running minutes of the last complete week.
-    pub last_week_minutes: f64,
+    /// Running minutes of the last 7 days (today included).
+    pub minutes_7d: f64,
+    /// Typical run: median duration of the last 3 runs of the window, seconds (0 = none).
+    pub typical_s: f64,
+    /// Runs per week over the last 4 weeks (or since the first run, if more recent).
+    pub runs_per_week: f64,
+    pub last_run: Option<NaiveDate>,
     /// Longest run of the last 28 days, meters and seconds.
     pub longest_m: f64,
     pub longest_s: f64,
@@ -144,13 +149,30 @@ pub fn assess(inp: &Inputs, goal: &Goal) -> Fitness {
         km += a.distance().unwrap_or(0.0) / 1000.0;
     }
     f.weekly_minutes = mins / 3.0;
-    f.last_week_minutes = inp
+    f.minutes_7d = inp
         .runs
         .iter()
-        .filter(|a| (ws - Duration::days(7)..ws).contains(&day(a)))
+        .filter(|a| day(a) > today - Duration::days(7) && day(a) <= today)
         .map(|a| a.duration().unwrap_or(0.0) / 60.0)
         .sum();
     f.weekly_km = km / 3.0;
+
+    // the typical run and how often the runner actually runs
+    let mut by_time = recent.clone();
+    by_time.sort_by_key(|a| a.start_time);
+    let mut last3: Vec<f64> = by_time.iter().rev().take(3).filter_map(|a| a.duration()).collect();
+    last3.sort_by(f64::total_cmp);
+    f.typical_s = last3.get(last3.len() / 2).copied().unwrap_or(0.0);
+    f.last_run = inp.runs.iter().map(day).filter(|d| *d <= today).max();
+    if let Some(first) = inp.runs.iter().map(day).filter(|d| *d <= today).min() {
+        let days = (today - first).num_days().clamp(7, 28) as f64;
+        let n = inp
+            .runs
+            .iter()
+            .filter(|a| day(a) >= today - Duration::days(days as i64) && day(a) <= today)
+            .count();
+        f.runs_per_week = n as f64 / (days / 7.0);
+    }
 
     for a in inp
         .runs
@@ -315,6 +337,10 @@ mod tests {
             &goal,
         );
         assert!(f.weekly_minutes > 50.0, "{}", f.weekly_minutes);
+        // a run every 3 days, about 30 minutes each
+        assert!((f.runs_per_week - 7.0 / 3.0).abs() < 0.3, "{}", f.runs_per_week);
+        assert!(f.typical_s > 1500.0 && f.typical_s < 2100.0, "{}", f.typical_s);
+        assert_eq!(f.last_run, Some(today - Duration::days(3)));
         assert!((f.longest_m - 5000.0).abs() < 1e-6);
         assert!(f.model.is_some());
         assert!(f.easy_pace > 360.0, "{}", f.easy_pace);
@@ -339,5 +365,6 @@ mod tests {
         assert_eq!(f.easy_pace, BEGINNER_EASY_PACE);
         assert!(f.model.is_none());
         assert_eq!(f.weekly_minutes, 0.0);
+        assert_eq!((f.typical_s, f.runs_per_week, f.last_run), (0.0, 0.0, None));
     }
 }
